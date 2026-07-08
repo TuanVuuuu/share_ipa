@@ -1,0 +1,4 @@
+share-ipa.vunt.info {
+    tls internal
+    reverse_proxy localhost:3000
+}
