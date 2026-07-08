@@ -545,70 +545,82 @@ function armStallWatch() {
 
 async function uploadSecure(file) {
     const startedAt = startProcessingUI();
-    const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB/chunk: đủ nhỏ để mỗi request không chạm timeout 100s
+    const CHUNK_SIZE = 6 * 1024 * 1024;   // 6MB/chunk: ít vòng gửi hơn mà vẫn dưới timeout 100s
+    const CONCURRENCY = 4;                 // số chunk gửi song song để lấp đầy băng thông
+    const MAX_RETRY = 2;                   // tự thử lại chunk lỗi trước khi bỏ cuộc
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const uploadId = Date.now().toString() + Math.random().toString(36).slice(2, 8);
 
-    let uploadedBytes = 0;
-    let lastBytes = 0;
-    let lastTs = performance.now();
-    let smoothedBps = 0;
+    let completedBytes = 0;
+    const uploadStartTs = performance.now();
 
     const callChunkApi = async (chunkBlob, index) => {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 45 * 1000); // mỗi chunk tối đa 45s
-        try {
-            const formData = new FormData();
-            formData.append('chunk', chunkBlob, `${file.name}.part${index}`);
-            formData.append('uploadId', uploadId);
-            formData.append('chunkIndex', String(index));
-            formData.append('totalChunks', String(totalChunks));
-            formData.append('originalName', file.name);
+        let attempt = 0;
+        while (true) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 60 * 1000); // mỗi chunk tối đa 60s
+            try {
+                const formData = new FormData();
+                formData.append('chunk', chunkBlob, `${file.name}.part${index}`);
+                formData.append('uploadId', uploadId);
+                formData.append('chunkIndex', String(index));
+                formData.append('totalChunks', String(totalChunks));
+                formData.append('originalName', file.name);
 
-            const res = await fetch('/api/upload-chunk', {
-                method: 'POST',
-                body: formData,
-                signal: controller.signal
-            });
-            const data = await res.json().catch(() => ({ success: false, message: 'Phản hồi không hợp lệ khi upload chunk.' }));
-            if (!res.ok || !data.success) {
-                throw new Error(data.message || `Upload chunk #${index + 1} thất bại.`);
+                const res = await fetch('/api/upload-chunk', {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+                const data = await res.json().catch(() => ({ success: false, message: 'Phản hồi không hợp lệ khi upload chunk.' }));
+                if (!res.ok || !data.success) {
+                    throw new Error(data.message || `Upload chunk #${index + 1} thất bại.`);
+                }
+                return;
+            } catch (e) {
+                attempt++;
+                if (attempt > MAX_RETRY) throw e;
+                await new Promise(r => setTimeout(r, 800 * attempt)); // chờ ngắn rồi thử lại
+            } finally {
+                clearTimeout(timeout);
             }
-        } finally {
-            clearTimeout(timeout);
         }
+    };
+
+    const refreshProgress = () => {
+        armStallWatch();
+        const elapsedSec = (performance.now() - uploadStartTs) / 1000;
+        const avgBps = elapsedSec > 0 ? completedBytes / elapsedSec : 0;
+        const uploadedPercent = (completedBytes / file.size) * 100;
+        const mapped = Math.min(uploadedPercent * 0.9, 90);
+        updateProgress(mapped, `Đang tải lên: ${Math.round(uploadedPercent)}% (${formatBytesClient(completedBytes)} / ${formatBytesClient(file.size)})`);
+        progressSpeed.innerText = formatSpeed(avgBps);
+        const remainingBytes = file.size - completedBytes;
+        progressEta.innerText = avgBps > 0 ? formatEta(remainingBytes / avgBps) : '--';
+        setActivity(`Đang truyền song song ${CONCURRENCY} luồng (${formatBytesClient(completedBytes)} / ${formatBytesClient(file.size)}) • ${formatSpeed(avgBps)}`, 'active');
     };
 
     try {
         armStallWatch();
-        for (let i = 0; i < totalChunks; i++) {
-            const start = i * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, file.size);
-            const chunk = file.slice(start, end);
+        setActivity(`Đang tải lên song song ${CONCURRENCY} luồng...`, 'active');
 
-            setActivity(`Đang tải chunk ${i + 1}/${totalChunks} lên máy chủ...`, 'active');
-            await callChunkApi(chunk, i);
-            armStallWatch();
-
-            uploadedBytes = end;
-            const now = performance.now();
-            const deltaBytes = uploadedBytes - lastBytes;
-            const deltaSec = (now - lastTs) / 1000;
-            if (deltaSec > 0 && deltaBytes >= 0) {
-                const instantBps = deltaBytes / deltaSec;
-                smoothedBps = smoothedBps === 0 ? instantBps : smoothedBps * 0.7 + instantBps * 0.3;
-                lastBytes = uploadedBytes;
-                lastTs = now;
+        // Hàng đợi chỉ số chunk + nhóm worker rút việc song song
+        let nextIndex = 0;
+        const worker = async () => {
+            while (nextIndex < totalChunks) {
+                const i = nextIndex++;
+                const start = i * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, file.size);
+                const chunk = file.slice(start, end);
+                await callChunkApi(chunk, i);
+                completedBytes += (end - start);
+                refreshProgress();
             }
+        };
 
-            const uploadedPercent = (uploadedBytes / file.size) * 100;
-            const mapped = Math.min(uploadedPercent * 0.9, 90);
-            updateProgress(mapped, `Đang tải lên: ${Math.round(uploadedPercent)}% (${formatBytesClient(uploadedBytes)} / ${formatBytesClient(file.size)})`);
-            progressSpeed.innerText = formatSpeed(smoothedBps);
-            const remainingBytes = file.size - uploadedBytes;
-            progressEta.innerText = smoothedBps > 0 ? formatEta(remainingBytes / smoothedBps) : '--';
-            setActivity(`Đang truyền dữ liệu lên máy chủ (${formatBytesClient(uploadedBytes)} / ${formatBytesClient(file.size)}) • ${formatSpeed(smoothedBps)}`, 'active');
-        }
+        const workers = [];
+        for (let w = 0; w < Math.min(CONCURRENCY, totalChunks); w++) workers.push(worker());
+        await Promise.all(workers);
 
         clearStallWatch();
         progressEta.innerText = 'Đã tải xong';
@@ -645,7 +657,7 @@ async function uploadSecure(file) {
         clearStallWatch();
         const isAbort = err && (err.name === 'AbortError');
         failUpload(isAbort
-            ? 'Một chunk upload bị timeout (>45s). Mạng quá chậm hoặc proxy đang nghẽn.'
+            ? 'Một chunk upload bị timeout (>60s). Mạng quá chậm hoặc proxy đang nghẽn.'
             : (err.message || 'Không thể kết nối tới máy chủ. Kiểm tra mạng rồi thử lại.'));
     }
 }
