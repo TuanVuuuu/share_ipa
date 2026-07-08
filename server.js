@@ -54,39 +54,36 @@ function getConfiguredCredentials() {
     };
 }
 
-function requireAuth(req, res, next) {
-    console.log("COOKIE =", req.headers.cookie);
-    if (req.path === '/login' || req.path === '/api/login') return next();
-
+function isAuthenticated(req) {
     const cookies = parseCookies(req.headers.cookie || '');
-    if (cookies[AUTH_COOKIE_NAME] === 'true') return next();
+    return cookies[AUTH_COOKIE_NAME] === 'true';
+}
 
-    if (req.path.startsWith('/api/')) {
-        return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập trước khi sử dụng.' });
-    }
-
-    return res.redirect('/login');
+function requireAuth(req, res, next) {
+    if (isAuthenticated(req)) return next();
+    return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập trước khi sử dụng.' });
 }
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.get('/login', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+
+// Trang chính và tài nguyên tĩnh mở tự do (không bắt buộc đăng nhập)
+app.use(express.static('public'));
+app.use('/uploads', express.static(UPLOADS_MAIN_DIR));
+app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
+
+// Đường dẫn /login cũ giờ trỏ thẳng về trang chính (ô đăng nhập nằm ngay trong trang)
+app.get('/login', (req, res) => res.redirect('/'));
+
+// Kiểm tra trạng thái đăng nhập cho frontend
+app.get('/api/auth-status', (req, res) => {
+    res.json({ authenticated: isAuthenticated(req) });
 });
 
-app.post('/login', (req, res) => {
-    console.log('===== LOGIN =====');
-    console.log(req.body);
-
+// Đăng nhập bằng AJAX ngay trong trang chính
+app.post('/api/login', (req, res) => {
     const { username = '', password = '' } = req.body || {};
     const configured = getConfiguredCredentials();
-
-    console.log('Typed Username:', username);
-    console.log('Typed Password:', password);
-
-    console.log('Config Username:', configured.username);
-    console.log('Config Password:', configured.password);
-    console.log('=================');
 
     const typedUsername = username.toString().trim();
     const typedPassword = password.toString().trim();
@@ -99,16 +96,23 @@ app.post('/login', (req, res) => {
             `${AUTH_COOKIE_NAME}=true; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
         );
 
-        return res.redirect('/');
+        return res.json({ success: true });
     }
 
-    return res.redirect('/login?error=1');
+    return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không đúng.' });
 });
 
-app.use(requireAuth);
-app.use(express.static('public'));
-app.use('/uploads', express.static(UPLOADS_MAIN_DIR));
-app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
+app.post('/api/logout', (req, res) => {
+    res.setHeader(
+        'Set-Cookie',
+        `${AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+    );
+    res.json({ success: true });
+});
+
+// Chỉ bảo vệ các API nhạy cảm phía sau
+app.use('/api/upload-secure', requireAuth);
+app.use('/api/logs', requireAuth);
 
 const systemLogs = [];
 let logClients = [];

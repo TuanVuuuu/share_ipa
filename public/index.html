@@ -4,202 +4,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hệ Thống Chia Sẻ Ứng Dụng IPA Nội Bộ</title>
+    <link rel="stylesheet" href="/css/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
-    <style>
-        :root {
-            --primary: #007aff;
-            --success: #34c759;
-            --danger: #ff3b30;
-            --bg: #f5f5f7;
-            --card: #ffffff;
-            --text: #1d1d1f;
-        }
-        *, *::before, *::after {
-            box-sizing: border-box;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        .container {
-            width: 100%;
-            max-width: 650px;
-            background: var(--card);
-            padding: 30px;
-            border-radius: 16px;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.04);
-            margin-bottom: 20px;
-        }
-        h2 { text-align: center; margin-top: 0; font-weight: 600; }
-        #drop-zone {
-            border: 2px dashed #d2d2d7;
-            border-radius: 12px;
-            padding: 40px 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            background: #fafafa;
-        }
-        #drop-zone.dragover {
-            border-color: var(--primary);
-            background: #f0f7ff;
-        }
-        .progress-container {
-            margin-top: 20px;
-            display: none;
-        }
-        .progress-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-            font-size: 13px;
-            color: #4c4c52;
-        }
-        .progress-bar {
-            width: 100%;
-            height: 10px;
-            background: #e5e5ea;
-            border-radius: 999px;
-            overflow: hidden;
-        }
-        .progress-fill {
-            height: 100%;
-            width: 0%;
-            background: var(--primary);
-            transition: width 0.25s ease;
-        }
-        .status-text {
-            font-size: 14px;
-            margin-top: 8px;
-            color: #86868b;
-            text-align: center;
-        }
-        .progress-metrics {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-            font-size: 12px;
-            color: #666;
-        }
-        .progress-metric {
-            background: #f7f7f8;
-            border-radius: 10px;
-            padding: 8px 10px;
-        }
-        .progress-metric strong {
-            display: block;
-            margin-bottom: 2px;
-            color: var(--text);
-        }
-        #result-zone {
-            margin-top: 25px;
-            display: none;
-            padding: 20px;
-            border-radius: 12px;
-            background: #fdfdfd;
-            border: 1px solid #e5e5ea;
-        }
-        .app-meta {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        .app-icon {
-            width: 64px;
-            height: 64px;
-            border-radius: 14px;
-            object-fit: cover;
-            border: 1px solid #d2d2d7;
-        }
-        .app-details h3 { margin: 0 0 4px 0; font-size: 18px; }
-        .app-details p { margin: 0; color: #86868b; font-size: 14px; }
-        .qr-wrapper {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-            margin-top: 15px;
-        }
-        .qr-code img {
-            padding: 10px;
-            background: white;
-            border: 1px solid #e5e5ea;
-            border-radius: 8px;
-        }
-        .url-box {
-            width: 100%;
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            background: #f7f7f8;
-            border: 1px solid #e5e5ea;
-            border-radius: 10px;
-            padding: 8px 10px;
-        }
-        .url-box input {
-            flex: 1;
-            border: 0;
-            outline: none;
-            background: transparent;
-            font-size: 13px;
-            color: var(--text);
-        }
-        .action-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: center;
-        }
-        .btn {
-            display: inline-block;
-            padding: 10px 20px;
-            background: var(--primary);
-            color: white;
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: 500;
-            font-size: 14px;
-            text-align: center;
-            border: 0;
-            cursor: pointer;
-        }
-        .btn.secondary {
-            background: #f2f2f7;
-            color: var(--text);
-        }
-        .log-container {
-            width: 100%;
-            max-width: 650px;
-            background: #1e1e1e;
-            color: #a9b7c6;
-            font-family: "Courier New", Courier, monospace;
-            font-size: 12px;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
-            height: 250px;
-            overflow-y: auto;
-        }
-        .log-line { margin-bottom: 4px; line-height: 1.4; }
-        .log-info { color: #a9b7c6; }
-        .log-success { color: #629755; font-weight: bold; }
-        .log-error { color: #bc3f3c; font-weight: bold; }
-    </style>
 </head>
 <body>
 
 <div class="container">
     <h2>Phân Phối Ứng Dụng IPA Nội Bộ</h2>
-    
+
+    <div class="auth-box" id="auth-box" style="display: none;">
+        <h3>Đăng nhập để tiếp tục</h3>
+        <p>Vui lòng nhập thông tin truy cập được cấu hình trong file .env để mở khóa các chức năng bên dưới.</p>
+        <form class="auth-form" id="auth-form">
+            <div class="auth-field">
+                <label for="auth-username">Tên đăng nhập</label>
+                <input id="auth-username" name="username" type="text" required autocomplete="username" />
+            </div>
+            <div class="auth-field">
+                <label for="auth-password">Mật khẩu</label>
+                <input id="auth-password" name="password" type="password" required autocomplete="current-password" />
+            </div>
+            <button type="submit" class="btn" id="auth-submit">Đăng nhập</button>
+        </form>
+        <div class="auth-error" id="auth-error"></div>
+    </div>
+
+    <div class="auth-status" id="auth-status" style="display: none;">
+        <span>✅ Bạn đã đăng nhập. Có thể sử dụng đầy đủ chức năng.</span>
+        <button type="button" class="btn secondary" id="logout-btn">Đăng xuất</button>
+    </div>
+
     <div id="drop-zone">
         <p>Kéo và thả file <b>.ipa</b> vào đây hoặc bấm để chọn tệp</p>
         <input type="file" id="file-input" accept=".ipa" style="display: none;">
@@ -239,10 +73,10 @@
                 <p id="res-version">Phiên bản: 1.0.0 (Build 1)</p>
             </div>
         </div>
-        <hr style="border: 0; border-top: 1px solid #e5e5ea; margin: 15px 0;">
+        <hr class="divider">
         <div class="qr-wrapper">
             <div class="qr-code" id="qrcode-box"></div>
-            <p style="font-size: 13px; color: #86868b; text-align: center; margin: 0;">Quét mã QR bằng Camera của iPhone để cài đặt ứng dụng</p>
+            <p class="qr-hint">Quét mã QR bằng Camera của iPhone để cài đặt ứng dụng</p>
             <div class="url-box">
                 <input type="text" id="share-url" readonly value="">
                 <button type="button" class="btn secondary" id="copy-link-btn">Sao chép</button>
@@ -251,187 +85,17 @@
                 <a href="#" id="res-link" class="btn">Mở liên kết cài đặt</a>
                 <button type="button" class="btn secondary" id="download-qr-btn">Tải QR code</button>
             </div>
-            <div id="res-time" style="font-size: 12px; color: #34c759; margin-top: 5px;"></div>
+            <div id="res-time" class="res-time"></div>
         </div>
     </div>
 </div>
 
 <div class="log-container" id="terminal-logs">
-    <div style="color: #34c759; border-bottom: 1px solid #333; padding-bottom: 5px; margin-bottom: 8px; font-weight: bold;">
+    <div class="log-header">
         🖥️ REAL-TIME SYSTEM TERMINAL LOGS
     </div>
 </div>
 
-<script>
-    const dropZone = document.getElementById('drop-zone');
-    const fileInput = document.getElementById('file-input');
-    const progressArea = document.getElementById('progress-area');
-    const progressFill = document.getElementById('progress-bar-fill');
-    const progressPercent = document.getElementById('progress-percent');
-    const statusLabel = document.getElementById('status-label');
-    const progressStartTime = document.getElementById('progress-start-time');
-    const progressEndTime = document.getElementById('progress-end-time');
-    const progressDuration = document.getElementById('progress-duration');
-    const resultZone = document.getElementById('result-zone');
-    const logsContainer = document.getElementById('terminal-logs');
-    const shareUrlInput = document.getElementById('share-url');
-    const copyLinkButton = document.getElementById('copy-link-btn');
-    const downloadQrButton = document.getElementById('download-qr-btn');
-    let progressTimer = null;
-    let qrDownloadDataUrl = '';
-
-    // Kết nối nhận log real-time từ máy Mac
-    const eventSource = new EventSource('/api/logs');
-    eventSource.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        appendLog(data.time, data.message, data.type);
-    };
-
-    function appendLog(time, message, type) {
-        const div = document.createElement('div');
-        div.className = `log-line log-${type}`;
-        div.innerText = `[${time}] ${message}`;
-        logsContainer.appendChild(div);
-        logsContainer.scrollTop = logsContainer.scrollHeight;
-    }
-
-    dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('dragover');
-        if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
-    });
-    fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFile(e.target.files[0]); });
-
-    function handleFile(file) {
-        if (!file.name.endsWith('.ipa')) {
-            alert('Vui lòng chỉ chọn tệp tin định dạng .ipa');
-            return;
-        }
-        uploadSecure(file);
-    }
-
-    function updateProgress(percent, message, isComplete = false) {
-        const safePercent = Math.min(Math.max(percent, 0), 100);
-        progressFill.style.width = `${safePercent}%`;
-        progressFill.style.background = isComplete ? 'var(--success)' : 'var(--primary)';
-        progressPercent.innerText = `${Math.round(safePercent)}%`;
-        statusLabel.innerText = message;
-    }
-
-    function startProcessingUI() {
-        clearInterval(progressTimer);
-        progressArea.style.display = 'block';
-        resultZone.style.display = 'none';
-        updateProgress(5, 'Đang chuẩn bị tải tệp tin lên máy chủ...');
-
-        const startedAt = new Date();
-        progressStartTime.innerText = startedAt.toLocaleTimeString('vi-VN');
-        progressEndTime.innerText = 'Đang xử lý...';
-        progressDuration.innerText = 'Đang xử lý...';
-
-        let simulatedProgress = 8;
-        progressTimer = setInterval(() => {
-            simulatedProgress = Math.min(simulatedProgress + Math.random() * 8 + 2, 92);
-            updateProgress(simulatedProgress, simulatedProgress < 80 ? 'Máy chủ đang xử lý dữ liệu...' : 'Đang kết nối và chuẩn bị kết quả...');
-        }, 450);
-
-        return startedAt;
-    }
-
-    async function uploadSecure(file) {
-        const startedAt = startProcessingUI();
-
-        try {
-            const formData = new FormData();
-            formData.append('ipaFile', file);
-
-            const response = await fetch('/api/upload-secure', {
-                method: 'POST',
-                body: formData
-            });
-
-            clearInterval(progressTimer);
-            updateProgress(95, 'Máy chủ đang hoàn tất xử lý và tạo liên kết chia sẻ...', false);
-
-            const contentType = response.headers.get("content-type");
-            if (!contentType || !contentType.includes("application/json")) {
-                throw new Error("Máy chủ trả về phản hồi lỗi dạng HTML/Văn bản thay vì JSON. Vui lòng kiểm tra Log Terminal bên dưới.");
-            }
-
-            const finalResult = await response.json();
-            
-            if (!finalResult.success) {
-                throw new Error(finalResult.message || 'Lỗi xử lý không xác định từ Server.');
-            }
-
-            const finishedAt = new Date();
-            const totalDuration = ((finishedAt - startedAt) / 1000).toFixed(2);
-
-            updateProgress(100, 'Hoàn tất xử lý thành công!', true);
-            progressEndTime.innerText = finishedAt.toLocaleTimeString('vi-VN');
-            progressDuration.innerText = `${totalDuration} giây`;
-
-            document.getElementById('res-icon').src = finalResult.appInfo.icon;
-            document.getElementById('res-name').innerText = finalResult.appInfo.appName;
-            document.getElementById('res-bundle').innerText = finalResult.appInfo.bundleId;
-            document.getElementById('res-version').innerText = `Phiên bản: ${finalResult.appInfo.version} (Build ${finalResult.appInfo.buildNumber})`;
-            document.getElementById('res-link').href = finalResult.downloadUrl;
-            document.getElementById('res-time').innerText = `⏱️ Bắt đầu: ${startedAt.toLocaleTimeString('vi-VN')} • Kết thúc: ${finishedAt.toLocaleTimeString('vi-VN')} • Tổng: ${totalDuration} giây`;
-            shareUrlInput.value = finalResult.shareUrl;
-
-            const qrBox = document.getElementById('qrcode-box');
-            qrBox.innerHTML = '';
-            const qr = qrcode(0, 'M');
-            qr.addData(finalResult.shareUrl);
-            qr.make();
-            const qrImg = document.createElement('img');
-            qrImg.src = qr.createDataURL(8, 0);
-            qrImg.alt = 'Mã QR chia sẻ IPA';
-            qrImg.width = 220;
-            qrImg.height = 220;
-            qrBox.appendChild(qrImg);
-            qrDownloadDataUrl = qrImg.src;
-
-            resultZone.style.display = 'block';
-
-        } catch (err) {
-            clearInterval(progressTimer);
-            updateProgress(0, `❌ Thất bại: ${err.message}`, false);
-            progressFill.style.background = 'var(--danger)';
-            progressDuration.innerText = 'Thất bại';
-        }
-    }
-
-    copyLinkButton.addEventListener('click', async () => {
-        const url = shareUrlInput.value;
-        if (!url) return;
-
-        try {
-            await navigator.clipboard.writeText(url);
-            copyLinkButton.innerText = 'Đã sao chép';
-            setTimeout(() => {
-                copyLinkButton.innerText = 'Sao chép';
-            }, 1500);
-        } catch (error) {
-            shareUrlInput.select();
-            document.execCommand('copy');
-            copyLinkButton.innerText = 'Đã sao chép';
-            setTimeout(() => {
-                copyLinkButton.innerText = 'Sao chép';
-            }, 1500);
-        }
-    });
-
-    downloadQrButton.addEventListener('click', () => {
-        if (!qrDownloadDataUrl) return;
-        const link = document.createElement('a');
-        link.href = qrDownloadDataUrl;
-        link.download = 'qrcode-share-ipa.png';
-        link.click();
-    });
-</script>
+<script src="/js/app.js"></script>
 </body>
 </html>
