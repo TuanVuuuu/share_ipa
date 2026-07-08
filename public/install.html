@@ -3,30 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cài đặt ứng dụng</title>
+    <title>Share IPA</title>
     <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
 
-<div class="container install-zone">
-    <h2>Cài đặt ứng dụng</h2>
+<div class="container install-zone is-loading" id="install-zone">
+    <div class="install-brand">Share IPA</div>
 
-    <div class="app-meta">
-        <img src="https://cdn-icons-png.flaticon.com/512/5115/5115293.png" alt="App Icon" class="app-icon" id="install-icon">
-        <div class="app-details">
-            <h3 id="install-name">Đang tải thông tin bản build...</h3>
-            <p id="install-bundle"></p>
-            <p id="install-version"></p>
-        </div>
+    <div class="install-skeleton" id="install-skeleton" aria-hidden="true">
+        <div class="sk sk-icon"></div>
+        <div class="sk sk-line sk-line-lg"></div>
+        <div class="sk sk-line sk-line-sm"></div>
+        <div class="sk sk-badge"></div>
     </div>
 
-    <div class="install-meta" id="install-extra"></div>
-
-    <hr class="divider">
+    <div class="install-content" id="install-content">
+        <img src="https://cdn-icons-png.flaticon.com/512/5115/5115293.png" alt="App Icon" class="install-icon" id="install-icon">
+        <h3 class="install-name" id="install-name"></h3>
+        <p class="install-bundle" id="install-bundle"></p>
+        <span class="install-badge" id="install-version"></span>
+        <div class="install-meta" id="install-extra"></div>
+    </div>
 
     <a href="#" id="install-btn" class="btn install-btn">Cài đặt ngay</a>
     <p class="qr-hint" id="install-hint">Vui lòng mở trang này bằng iPhone/iPad để cài đặt.</p>
-    <a href="/" class="btn secondary" id="install-back">Về trang chủ</a>
+    <a href="/" class="install-back" id="install-back">Về trang chủ</a>
 </div>
 
 <script src="/js/install.js"></script>

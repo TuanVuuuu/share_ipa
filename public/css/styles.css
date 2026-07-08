@@ -290,31 +290,132 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 
 /* Trang cài đặt độc lập (mở khi quét QR) */
 .install-zone {
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     text-align: center;
-    max-width: 460px;
+    padding: 34px 26px 28px;
 }
-.install-zone .app-meta {
-    justify-content: center;
-    margin-bottom: 12px;
+.install-brand {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--primary);
+    margin-bottom: 22px;
 }
-.install-zone .app-details {
-    text-align: left;
+.install-icon {
+    width: 96px;
+    height: 96px;
+    border-radius: 22px;
+    object-fit: cover;
+    border: 1px solid #e5e5ea;
+    box-shadow: 0 8px 22px rgba(253, 92, 0, 0.18);
+    margin-bottom: 16px;
+}
+.install-name {
+    margin: 0 0 4px;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+.install-bundle {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: #86868b;
+    word-break: break-all;
+}
+.install-badge {
+    display: inline-block;
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 5px 14px;
+    margin-bottom: 10px;
 }
 .install-meta {
     font-size: 13px;
     color: #6b6b70;
-    margin-bottom: 4px;
+    margin-bottom: 22px;
 }
 .install-btn {
     display: block;
     width: 100%;
-    padding: 14px 20px;
+    padding: 15px 20px;
     font-size: 16px;
-    margin-bottom: 10px;
+    font-weight: 600;
+    border-radius: 12px;
+    background: var(--primary);
+    box-shadow: 0 6px 16px rgba(253, 92, 0, 0.28);
+    transition: background 0.2s ease, transform 0.1s ease;
 }
-.install-zone .btn.secondary {
-    display: inline-block;
-    margin-top: 6px;
+.install-btn:hover { background: var(--primary-dark); }
+.install-btn:active { transform: scale(0.98); }
+.install-zone .qr-hint {
+    margin: 14px 0 0;
+    max-width: 300px;
+}
+.install-back {
+    margin-top: 18px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--primary);
+    text-decoration: none;
+}
+.install-back:hover { text-decoration: underline; }
+
+/* Skeleton loading cho trang cài đặt */
+.install-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    animation: install-fade-in 0.3s ease;
+}
+.install-skeleton {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+.install-zone.is-loading .install-content { display: none; }
+.install-zone.is-loading .install-skeleton { display: flex; }
+.install-zone.is-loading .install-btn {
+    background: #e8e8ed;
+    color: transparent;
+    box-shadow: none;
+    pointer-events: none;
+}
+.install-zone.is-loading .qr-hint,
+.install-zone.is-loading .install-back { visibility: hidden; }
+
+.sk {
+    background: linear-gradient(100deg, #ececf0 30%, #f6f6f8 50%, #ececf0 70%);
+    background-size: 200% 100%;
+    animation: sk-shimmer 1.2s ease-in-out infinite;
+    border-radius: 8px;
+}
+.sk-icon {
+    width: 96px;
+    height: 96px;
+    border-radius: 22px;
+    margin-bottom: 18px;
+}
+.sk-line { height: 16px; }
+.sk-line-lg { width: 62%; margin-bottom: 12px; }
+.sk-line-sm { width: 42%; height: 12px; margin-bottom: 16px; }
+.sk-badge { width: 140px; height: 26px; border-radius: 999px; }
+
+@keyframes sk-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+@keyframes install-fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Danh mục ứng dụng */
