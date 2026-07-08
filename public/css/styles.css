@@ -285,3 +285,150 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     filter: grayscale(0.2);
     user-select: none;
 }
+
+/* Danh mục ứng dụng */
+.catalog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.catalog-head h2 {
+    text-align: left;
+    margin: 0;
+}
+.catalog-sub {
+    margin: 6px 0 18px;
+    font-size: 13px;
+    color: #86868b;
+}
+.catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+}
+.catalog-empty {
+    text-align: center;
+    color: #86868b;
+    font-size: 14px;
+    padding: 24px 0;
+}
+.app-card {
+    border: 1px solid #e5e5ea;
+    border-radius: 12px;
+    padding: 14px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.app-card:hover {
+    box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+    transform: translateY(-2px);
+}
+.app-card-top {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+.app-card-top img {
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+    object-fit: cover;
+    border: 1px solid #d2d2d7;
+    flex: 0 0 auto;
+}
+.app-card-info {
+    min-width: 0;
+}
+.app-card-info h4 {
+    margin: 0 0 3px;
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.app-card-info .app-card-bundle {
+    margin: 0;
+    font-size: 12px;
+    color: #86868b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.app-card-meta {
+    font-size: 12px;
+    color: #6b6b70;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.app-card-meta .badge {
+    display: inline-block;
+    background: #eef2ff;
+    color: #3b5bdb;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-weight: 600;
+    font-size: 11px;
+    width: fit-content;
+}
+.app-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: auto;
+}
+.app-card-actions .btn {
+    flex: 1;
+    padding: 8px 10px;
+    font-size: 13px;
+}
+
+/* Modal xem QR */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 1000;
+}
+.modal-card {
+    position: relative;
+    background: #fff;
+    border-radius: 16px;
+    padding: 26px 24px;
+    width: 100%;
+    max-width: 360px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+}
+.modal-card h3 {
+    margin: 0;
+    text-align: center;
+    font-size: 18px;
+}
+.modal-card .qr-code img {
+    width: 240px;
+    height: 240px;
+}
+.modal-close {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    border: 0;
+    background: transparent;
+    font-size: 26px;
+    line-height: 1;
+    cursor: pointer;
+    color: #86868b;
+}
+.modal-card .url-box { width: 100%; }
+.modal-card .btn { width: 100%; }

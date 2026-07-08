@@ -21,7 +21,23 @@ const authForm = document.getElementById('auth-form');
 const authError = document.getElementById('auth-error');
 const authSubmit = document.getElementById('auth-submit');
 const logoutBtn = document.getElementById('logout-btn');
-const protectedAreas = [dropZone, progressArea, resultZone, logsContainer];
+
+const catalogContainer = document.getElementById('catalog-container');
+const catalogList = document.getElementById('catalog-list');
+const catalogEmpty = document.getElementById('catalog-empty');
+const catalogSub = document.getElementById('catalog-sub');
+const catalogRefreshBtn = document.getElementById('catalog-refresh-btn');
+
+const qrModal = document.getElementById('qr-modal');
+const qrModalClose = document.getElementById('qr-modal-close');
+const qrModalTitle = document.getElementById('qr-modal-title');
+const qrModalVersion = document.getElementById('qr-modal-version');
+const qrModalImage = document.getElementById('qr-modal-image');
+const qrModalUrl = document.getElementById('qr-modal-url');
+const qrModalCopy = document.getElementById('qr-modal-copy');
+const qrModalInstall = document.getElementById('qr-modal-install');
+
+const protectedAreas = [dropZone, progressArea, resultZone, logsContainer, catalogContainer];
 
 let isAuthenticated = false;
 let logsSource = null;
@@ -48,8 +64,154 @@ function applyAuthState(authenticated) {
 
     if (authenticated) {
         connectLogs();
+        loadCatalog();
     }
 }
+
+const FALLBACK_ICON = 'https://cdn-icons-png.flaticon.com/512/5115/5115293.png';
+
+function escapeHtml(text) {
+    return String(text == null ? '' : text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatDateTime(iso) {
+    if (!iso) return '--';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString('vi-VN');
+}
+
+let catalogItems = [];
+
+async function loadCatalog() {
+    if (!isAuthenticated) return;
+    catalogSub.innerText = 'Đang tải danh mục...';
+    try {
+        const res = await fetch('/api/catalog');
+        if (!res.ok) throw new Error('Không tải được danh mục.');
+        const data = await res.json();
+        catalogItems = Array.isArray(data.items) ? data.items : [];
+        if (!data.configured) {
+            catalogSub.innerText = '⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO trong .env nên danh mục trống.';
+        }
+        renderCatalog(data.configured);
+    } catch (err) {
+        catalogSub.innerText = `Lỗi tải danh mục: ${err.message}`;
+        catalogList.innerHTML = '';
+        catalogEmpty.style.display = 'none';
+    }
+}
+
+// Gom nhóm theo bundleId, chỉ hiển thị bản build mới nhất của mỗi app
+function groupLatestByBundle(items) {
+    const map = new Map();
+    items.forEach(item => {
+        const key = item.bundleId || item.id;
+        const existing = map.get(key);
+        if (!existing) {
+            map.set(key, { latest: item, count: 1 });
+        } else {
+            existing.count += 1;
+            const a = new Date(item.uploadedAt).getTime() || 0;
+            const b = new Date(existing.latest.uploadedAt).getTime() || 0;
+            if (a > b) existing.latest = item;
+        }
+    });
+    return Array.from(map.values())
+        .sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
+}
+
+function renderCatalog(configured) {
+    const groups = groupLatestByBundle(catalogItems);
+    catalogList.innerHTML = '';
+
+    if (configured !== false) {
+        catalogSub.innerText = groups.length
+            ? `Có ${groups.length} ứng dụng trong danh mục.`
+            : 'Danh sách các ứng dụng đã xử lý và lưu trữ.';
+    }
+
+    if (!groups.length) {
+        catalogEmpty.style.display = 'block';
+        return;
+    }
+    catalogEmpty.style.display = 'none';
+
+    groups.forEach(({ latest, count }) => {
+        const card = document.createElement('div');
+        card.className = 'app-card';
+        card.innerHTML = `
+            <div class="app-card-top">
+                <img src="${escapeHtml(latest.icon || FALLBACK_ICON)}" alt="icon" onerror="this.src='${FALLBACK_ICON}'">
+                <div class="app-card-info">
+                    <h4>${escapeHtml(latest.appName)}</h4>
+                    <p class="app-card-bundle">${escapeHtml(latest.bundleId)}</p>
+                </div>
+            </div>
+            <div class="app-card-meta">
+                <span class="badge">v${escapeHtml(latest.version)} (Build ${escapeHtml(latest.buildNumber)})</span>
+                <span>📦 ${escapeHtml(latest.fileSize || '--')}${count > 1 ? ` • ${count} bản build` : ''}</span>
+                <span>🕒 ${escapeHtml(formatDateTime(latest.uploadedAt))}</span>
+            </div>
+            <div class="app-card-actions">
+                <button type="button" class="btn qr-btn">Xem QR</button>
+                <a class="btn secondary" href="${escapeHtml(latest.downloadUrl)}">Cài đặt</a>
+            </div>
+        `;
+        card.querySelector('.qr-btn').addEventListener('click', () => openQrModal(latest));
+        catalogList.appendChild(card);
+    });
+}
+
+function openQrModal(item) {
+    qrModalTitle.innerText = item.appName || 'Ứng dụng';
+    qrModalVersion.innerText = `${item.bundleId || ''} • v${item.version} (Build ${item.buildNumber})`;
+    qrModalUrl.value = item.shareUrl || '';
+    qrModalInstall.href = item.downloadUrl || '#';
+
+    qrModalImage.innerHTML = '';
+    const img = document.createElement('img');
+    if (item.qr) {
+        img.src = item.qr;
+    } else if (item.shareUrl) {
+        const qr = qrcode(0, 'M');
+        qr.addData(item.shareUrl);
+        qr.make();
+        img.src = qr.createDataURL(8, 0);
+    }
+    img.alt = 'QR cài đặt';
+    qrModalImage.appendChild(img);
+
+    qrModal.style.display = 'flex';
+}
+
+function closeQrModal() {
+    qrModal.style.display = 'none';
+}
+
+qrModalClose.addEventListener('click', closeQrModal);
+qrModal.addEventListener('click', (e) => { if (e.target === qrModal) closeQrModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeQrModal(); });
+
+qrModalCopy.addEventListener('click', async () => {
+    const url = qrModalUrl.value;
+    if (!url) return;
+    try {
+        await navigator.clipboard.writeText(url);
+    } catch (err) {
+        qrModalUrl.select();
+        document.execCommand('copy');
+    }
+    qrModalCopy.innerText = 'Đã sao chép';
+    setTimeout(() => { qrModalCopy.innerText = 'Sao chép'; }, 1500);
+});
+
+catalogRefreshBtn.addEventListener('click', loadCatalog);
 
 async function checkAuthStatus() {
     try {
@@ -217,6 +379,9 @@ async function uploadSecure(file) {
         qrDownloadDataUrl = qrImg.src;
 
         resultZone.style.display = 'block';
+
+        // Danh mục vừa được cập nhật ở server, tải lại để hiển thị app mới
+        loadCatalog();
 
     } catch (err) {
         clearInterval(progressTimer);

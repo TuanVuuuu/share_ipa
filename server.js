@@ -8,6 +8,12 @@ const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
 const AppInfoParser = require('app-info-parser');
+const QRCode = require('qrcode');
+const github = require('./github');
+
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.info';
+const CATALOG_PATH = 'catalog.json';       // Chỉ mục danh sách app trên repo lưu trữ
+const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ lại trong danh mục
 
 console.log('========== ENV ==========');
 console.log('__dirname:', __dirname);
@@ -18,6 +24,9 @@ console.log('ACCESS_PASSWORD:', process.env.ACCESS_PASSWORD);
 
 console.log('USERNAME:', process.env.USERNAME);
 console.log('PASSWORD:', process.env.PASSWORD);
+
+console.log('GITHUB_REPO:', process.env.GITHUB_REPO);
+console.log('GITHUB_TOKEN:', process.env.GITHUB_TOKEN ? '***(đã cấu hình)' : '(chưa cấu hình)');
 
 console.log('=========================');
 
@@ -113,6 +122,7 @@ app.post('/api/logout', (req, res) => {
 // Chỉ bảo vệ các API nhạy cảm phía sau
 app.use('/api/upload-secure', requireAuth);
 app.use('/api/logs', requireAuth);
+app.use('/api/catalog', requireAuth);
 
 const systemLogs = [];
 let logClients = [];
@@ -133,6 +143,61 @@ function formatBytes(bytes, decimals = 2) {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
+
+// 📚 Đọc toàn bộ danh mục app đã lưu trên repo GitHub
+async function readCatalog() {
+    if (!github.isConfigured()) return [];
+    const file = await github.getFile(CATALOG_PATH);
+    if (!file) return [];
+    try {
+        const parsed = JSON.parse(file.content);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        console.error('Không đọc được catalog.json:', err.message);
+        return [];
+    }
+}
+
+// 💾 Thêm một bản ghi app mới vào đầu danh mục và đẩy lên GitHub
+async function appendToCatalog(record) {
+    if (!github.isConfigured()) {
+        logToUI('⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên bỏ qua bước lưu danh mục.', 'info');
+        return;
+    }
+
+    const file = await github.getFile(CATALOG_PATH);
+    let list = [];
+    let sha;
+
+    if (file) {
+        sha = file.sha;
+        try {
+            const parsed = JSON.parse(file.content);
+            if (Array.isArray(parsed)) list = parsed;
+        } catch (err) {
+            logToUI(`⚠️ catalog.json hiện tại không hợp lệ, sẽ khởi tạo lại. (${err.message})`, 'info');
+        }
+    }
+
+    list.unshift(record);
+    if (list.length > CATALOG_MAX_ITEMS) list = list.slice(0, CATALOG_MAX_ITEMS);
+
+    await github.putFile(
+        CATALOG_PATH,
+        JSON.stringify(list, null, 2),
+        `add ${record.appName} ${record.version} (${record.buildNumber})`,
+        sha
+    );
+}
+
+app.get('/api/catalog', async (req, res) => {
+    try {
+        const list = await readCatalog();
+        res.json({ success: true, configured: github.isConfigured(), items: list });
+    } catch (err) {
+        res.status(500).json({ success: false, message: `Không tải được danh mục: ${err.message}` });
+    }
+});
 
 app.get('/api/logs', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -219,18 +284,53 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
             // 🌐 TẠO FILE PLIST ĐỂ PHỤC VỤ CÀI ĐẶT OTA PUBLIC QUA CLOUDFLARE HTTPS
             const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>https://share-ipa.vunt.info/uploads/${finalFilename}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
+<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${PUBLIC_BASE_URL}/uploads/${finalFilename}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
 
             const plistFilename = `${finalFilename}.plist`;
             fs.writeFileSync(path.join(UPLOADS_MAIN_DIR, plistFilename), plistContent);
 
+            const manifestUrl = `${PUBLIC_BASE_URL}/uploads/${plistFilename}`;
+            const downloadUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
+            const shareUrl = `${PUBLIC_BASE_URL}/?plist=${plistFilename}`;
+
             logToUI(`🎉 Toàn bộ quy trình hoàn tất! Sẵn sàng chia sẻ dữ liệu công khai.`, 'success');
 
-            // Trả phản hồi ngay lập tức cho Frontend
+            // 🔳 Tạo ảnh QR (data URL) từ link cài đặt để lưu vĩnh viễn trong danh mục
+            let qrDataUrl = '';
+            try {
+                qrDataUrl = await QRCode.toDataURL(shareUrl, { width: 320, margin: 1 });
+            } catch (qrErr) {
+                logToUI(`⚠️ Không tạo được ảnh QR để lưu: ${qrErr.message}`, 'info');
+            }
+
+            // 🗂️ Lưu bản ghi vào danh mục app trên GitHub (không chặn nếu lỗi)
+            const catalogRecord = {
+                id: finalFilename,
+                appName: appInfo.appName,
+                bundleId: appInfo.bundleId,
+                version: appInfo.version,
+                buildNumber: appInfo.buildNumber,
+                icon: iconBase64,
+                qr: qrDataUrl,
+                fileSize: formattedTotalSize,
+                shareUrl,
+                downloadUrl,
+                uploadedAt: metadataInfo.uploadedAt,
+                processTimeSeconds: totalProcessTime
+            };
+
+            try {
+                await appendToCatalog(catalogRecord);
+                logToUI('🗂️ Đã lưu thông tin app vào danh mục trên GitHub.', 'success');
+            } catch (catalogErr) {
+                logToUI(`⚠️ Lưu danh mục lên GitHub thất bại: ${catalogErr.message}`, 'error');
+            }
+
+            // Trả phản hồi cho Frontend
             return res.json({
                 success: true,
-                downloadUrl: `itms-services://?action=download-manifest&url=${encodeURIComponent(`https://share-ipa.vunt.info/uploads/${plistFilename}`)}`,
-                shareUrl: `https://share-ipa.vunt.info/?plist=${plistFilename}`,
+                downloadUrl,
+                shareUrl,
                 processTime: totalProcessTime,
                 appInfo: { ...appInfo, icon: iconBase64 }
             });
