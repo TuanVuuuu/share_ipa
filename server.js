@@ -245,13 +245,37 @@ app.get('/api/app-info', async (req, res) => {
 
 app.get('/api/logs', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Chống buffering ở proxy (nginx/CDN)
     res.flushHeaders();
+
+    // Gợi ý thời gian client tự kết nối lại nếu rớt
+    res.write('retry: 3000\n\n');
+
+    // Phát lại các log gần đây để terminal không bị trống
     systemLogs.forEach(log => res.write(`data: ${JSON.stringify(log)}\n\n`));
+
+    // Dòng xác nhận đã kết nối (đảm bảo terminal luôn có ít nhất 1 dòng, chứng minh luồng hoạt động)
+    const connectedEntry = {
+        time: new Date().toLocaleTimeString(),
+        message: '🔌 Đã kết nối luồng log real-time. Sẵn sàng theo dõi tiến trình.',
+        type: 'success'
+    };
+    res.write(`data: ${JSON.stringify(connectedEntry)}\n\n`);
+
     const clientId = Date.now();
     logClients.push({ id: clientId, res });
-    req.on('close', () => { logClients = logClients.filter(client => client.id !== clientId); });
+
+    // Heartbeat định kỳ để giữ kết nối sống và buộc proxy xả dữ liệu
+    const heartbeat = setInterval(() => {
+        res.write(': ping\n\n');
+    }, 15000);
+
+    req.on('close', () => {
+        clearInterval(heartbeat);
+        logClients = logClients.filter(client => client.id !== clientId);
+    });
 });
 
 // Endpoint siêu tốc: Xử lý local, không đẩy file nặng qua bên thứ 3

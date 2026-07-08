@@ -15,6 +15,8 @@ const statusLabel = document.getElementById('status-label');
 const progressStartTime = document.getElementById('progress-start-time');
 const progressEndTime = document.getElementById('progress-end-time');
 const progressDuration = document.getElementById('progress-duration');
+const progressActivity = document.getElementById('progress-activity');
+const progressActivityText = document.getElementById('progress-activity-text');
 const resultZone = document.getElementById('result-zone');
 const logsContainer = document.getElementById('terminal-logs');
 const shareUrlInput = document.getElementById('share-url');
@@ -22,6 +24,16 @@ const copyLinkButton = document.getElementById('copy-link-btn');
 const downloadQrButton = document.getElementById('download-qr-btn');
 let progressTimer = null;
 let qrDownloadDataUrl = '';
+let isProcessing = false;
+
+// Cập nhật dòng "đang làm gì" ngay dưới thanh tiến trình để trấn an người dùng
+function setActivity(message, state = 'active') {
+    if (!progressActivity || !progressActivityText) return;
+    progressActivity.classList.remove('done', 'error');
+    if (state === 'done') progressActivity.classList.add('done');
+    else if (state === 'error') progressActivity.classList.add('error');
+    progressActivityText.innerText = message;
+}
 
 const authBox = document.getElementById('auth-box');
 const authStatus = document.getElementById('auth-status');
@@ -34,7 +46,14 @@ const catalogContainer = document.getElementById('catalog-container');
 const catalogList = document.getElementById('catalog-list');
 const catalogEmpty = document.getElementById('catalog-empty');
 const catalogSub = document.getElementById('catalog-sub');
+const catalogTitle = document.getElementById('catalog-title');
 const catalogRefreshBtn = document.getElementById('catalog-refresh-btn');
+const catalogDetail = document.getElementById('catalog-detail');
+const catalogBack = document.getElementById('catalog-back');
+const detailIcon = document.getElementById('detail-icon');
+const detailName = document.getElementById('detail-name');
+const detailBundle = document.getElementById('detail-bundle');
+const detailBuilds = document.getElementById('detail-builds');
 
 const qrModal = document.getElementById('qr-modal');
 const qrModalClose = document.getElementById('qr-modal-close');
@@ -51,16 +70,32 @@ let isAuthenticated = false;
 let logsSource = null;
 
 // Kết nối nhận log real-time từ máy Mac (chỉ khi đã đăng nhập)
+let logsReconnectTimer = null;
+
 function connectLogs() {
     if (logsSource) return;
     logsSource = new EventSource('/api/logs');
+
     logsSource.onmessage = function(event) {
-        const data = JSON.parse(event.data);
+        let data;
+        try { data = JSON.parse(event.data); } catch (e) { return; }
         appendLog(data.time, data.message, data.type);
+        // Khi đang xử lý, phản chiếu hoạt động thật của máy chủ lên dòng ngay dưới thanh tiến trình
+        if (isProcessing && data.type !== 'error') {
+            setActivity(data.message, 'active');
+        }
     };
+
     logsSource.onerror = function() {
-        logsSource.close();
-        logsSource = null;
+        // Đóng kết nối lỗi hiện tại rồi tự kết nối lại (nếu vẫn đăng nhập)
+        if (logsSource) {
+            logsSource.close();
+            logsSource = null;
+        }
+        clearTimeout(logsReconnectTimer);
+        if (isAuthenticated) {
+            logsReconnectTimer = setTimeout(connectLogs, 3000);
+        }
     };
 }
 
@@ -98,6 +133,7 @@ let catalogItems = [];
 
 async function loadCatalog() {
     if (!isAuthenticated) return;
+    showCatalogList(); // luôn quay về màn danh sách thư mục khi tải lại
     catalogSub.innerText = 'Đang tải danh mục...';
     try {
         const res = await fetch('/api/catalog');
@@ -115,27 +151,33 @@ async function loadCatalog() {
     }
 }
 
-// Gom nhóm theo bundleId, chỉ hiển thị bản build mới nhất của mỗi app
-function groupLatestByBundle(items) {
+// Gom nhóm theo bundleId: mỗi nhóm là 1 "thư mục app" kèm toàn bộ bản build
+function groupByBundle(items) {
     const map = new Map();
     items.forEach(item => {
         const key = item.bundleId || item.id;
-        const existing = map.get(key);
-        if (!existing) {
-            map.set(key, { latest: item, count: 1 });
-        } else {
-            existing.count += 1;
-            const a = new Date(item.uploadedAt).getTime() || 0;
-            const b = new Date(existing.latest.uploadedAt).getTime() || 0;
-            if (a > b) existing.latest = item;
-        }
+        if (!map.has(key)) map.set(key, { key, builds: [] });
+        map.get(key).builds.push(item);
     });
-    return Array.from(map.values())
-        .sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
+
+    const groups = Array.from(map.values());
+    groups.forEach(g => {
+        g.builds.sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
+        g.latest = g.builds[0];
+        g.count = g.builds.length;
+    });
+    return groups.sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
+}
+
+// Chuyển về màn hình danh sách thư mục
+function showCatalogList() {
+    catalogDetail.style.display = 'none';
+    catalogList.style.display = 'grid';
+    catalogTitle.innerText = 'Danh mục ứng dụng';
 }
 
 function renderCatalog(configured) {
-    const groups = groupLatestByBundle(catalogItems);
+    const groups = groupByBundle(catalogItems);
     catalogList.innerHTML = '';
 
     if (configured !== false) {
@@ -150,9 +192,10 @@ function renderCatalog(configured) {
     }
     catalogEmpty.style.display = 'none';
 
-    groups.forEach(({ latest, count }) => {
+    groups.forEach((group) => {
+        const { latest, count } = group;
         const card = document.createElement('div');
-        card.className = 'app-card';
+        card.className = 'app-card folder-card';
         card.innerHTML = `
             <div class="app-card-top">
                 <img src="${escapeHtml(latest.icon || FALLBACK_ICON)}" alt="icon" onerror="this.src='${FALLBACK_ICON}'">
@@ -162,19 +205,63 @@ function renderCatalog(configured) {
                 </div>
             </div>
             <div class="app-card-meta">
-                <span class="badge">v${escapeHtml(latest.version)} (Build ${escapeHtml(latest.buildNumber)})</span>
-                <span>📦 ${escapeHtml(latest.fileSize || '--')}${count > 1 ? ` • ${count} bản build` : ''}</span>
+                <span class="badge">📁 ${count} bản build</span>
+                <span>🆕 v${escapeHtml(latest.version)} (Build ${escapeHtml(latest.buildNumber)})</span>
                 <span>🕒 ${escapeHtml(formatDateTime(latest.uploadedAt))}</span>
             </div>
             <div class="app-card-actions">
-                <button type="button" class="btn qr-btn">Xem QR</button>
-                <a class="btn secondary" href="${escapeHtml(latest.downloadUrl)}">Cài đặt</a>
+                <button type="button" class="btn view-all-btn">Xem tất cả</button>
             </div>
         `;
-        card.querySelector('.qr-btn').addEventListener('click', () => openQrModal(latest));
+        const open = () => openAppDetail(group);
+        card.addEventListener('click', open);
         catalogList.appendChild(card);
     });
 }
+
+// Mở màn chi tiết: danh sách tất cả bản build của 1 app
+function openAppDetail(group) {
+    const { latest, builds } = group;
+
+    detailIcon.src = latest.icon || FALLBACK_ICON;
+    detailIcon.onerror = () => { detailIcon.src = FALLBACK_ICON; };
+    detailName.innerText = latest.appName || 'Ứng dụng iOS';
+    detailBundle.innerText = latest.bundleId || '';
+    catalogTitle.innerText = 'Chi tiết ứng dụng';
+    catalogSub.innerText = `${builds.length} bản build của "${latest.appName}".`;
+
+    detailBuilds.innerHTML = '';
+    builds.forEach((build, index) => {
+        const row = document.createElement('div');
+        row.className = 'build-row';
+        row.innerHTML = `
+            <div class="build-info">
+                <span class="badge">v${escapeHtml(build.version)} (Build ${escapeHtml(build.buildNumber)})</span>
+                ${index === 0 ? '<span class="build-latest">Mới nhất</span>' : ''}
+                <div class="build-sub">📦 ${escapeHtml(build.fileSize || '--')} • 🕒 ${escapeHtml(formatDateTime(build.uploadedAt))}</div>
+            </div>
+            <div class="build-actions">
+                <button type="button" class="btn secondary qr-btn">Xem QR</button>
+                <a class="btn install-mini" href="${escapeHtml(build.downloadUrl)}">Cài đặt</a>
+            </div>
+        `;
+        row.querySelector('.qr-btn').addEventListener('click', () => openQrModal(build));
+        detailBuilds.appendChild(row);
+    });
+
+    catalogList.style.display = 'none';
+    catalogEmpty.style.display = 'none';
+    catalogDetail.style.display = 'block';
+    catalogContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+catalogBack.addEventListener('click', () => {
+    showCatalogList();
+    const groups = groupByBundle(catalogItems);
+    catalogSub.innerText = groups.length
+        ? `Có ${groups.length} ứng dụng trong danh mục.`
+        : 'Danh sách các ứng dụng đã xử lý và lưu trữ.';
+});
 
 function openQrModal(item) {
     qrModalTitle.innerText = item.appName || 'Ứng dụng';
@@ -265,6 +352,7 @@ logoutBtn.addEventListener('click', async () => {
     try {
         await fetch('/api/logout', { method: 'POST' });
     } catch (err) { /* ignore */ }
+    clearTimeout(logsReconnectTimer);
     if (logsSource) {
         logsSource.close();
         logsSource = null;
@@ -304,99 +392,158 @@ function handleFile(file) {
     uploadSecure(file);
 }
 
-function updateProgress(percent, message, isComplete = false) {
+function updateProgress(percent, message, state = 'active') {
     const safePercent = Math.min(Math.max(percent, 0), 100);
     progressFill.style.width = `${safePercent}%`;
-    progressFill.style.background = isComplete ? 'var(--success)' : 'var(--primary)';
+    if (state === 'complete') progressFill.style.background = 'var(--success)';
+    else if (state === 'error') progressFill.style.background = 'var(--danger)';
+    else progressFill.style.background = 'var(--primary)';
     progressPercent.innerText = `${Math.round(safePercent)}%`;
     statusLabel.innerText = message;
 }
 
-function startProcessingUI() {
-    clearInterval(progressTimer);
-    progressArea.style.display = 'block';
-    resultZone.style.display = 'none';
-    updateProgress(5, 'Đang chuẩn bị tải tệp tin lên máy chủ...');
-
-    const startedAt = new Date();
-    progressStartTime.innerText = startedAt.toLocaleTimeString('vi-VN');
-    progressEndTime.innerText = 'Đang xử lý...';
-    progressDuration.innerText = 'Đang xử lý...';
-
-    let simulatedProgress = 8;
-    progressTimer = setInterval(() => {
-        simulatedProgress = Math.min(simulatedProgress + Math.random() * 8 + 2, 92);
-        updateProgress(simulatedProgress, simulatedProgress < 80 ? 'Máy chủ đang xử lý dữ liệu...' : 'Đang kết nối và chuẩn bị kết quả...');
-    }, 450);
-
-    return startedAt;
+function formatBytesClient(bytes) {
+    if (!bytes || bytes <= 0) return '0 MB';
+    const mb = bytes / (1024 * 1024);
+    if (mb >= 1) return `${mb.toFixed(1)} MB`;
+    return `${(bytes / 1024).toFixed(0)} KB`;
 }
 
-async function uploadSecure(file) {
+let uploadStartedAt = null;
+
+function startProcessingUI() {
+    clearInterval(progressTimer);
+    isProcessing = true;
+    progressArea.style.display = 'block';
+    resultZone.style.display = 'none';
+    updateProgress(0, 'Đang chuẩn bị tải tệp tin lên máy chủ...');
+    setActivity('Đang khởi tạo tiến trình...', 'active');
+
+    uploadStartedAt = new Date();
+    progressStartTime.innerText = uploadStartedAt.toLocaleTimeString('vi-VN');
+    progressEndTime.innerText = 'Đang xử lý...';
+    progressDuration.innerText = 'Đang xử lý...';
+    return uploadStartedAt;
+}
+
+function failUpload(message) {
+    clearInterval(progressTimer);
+    isProcessing = false;
+    updateProgress(0, `❌ Thất bại: ${message}`, 'error');
+    setActivity(message, 'error');
+    progressDuration.innerText = 'Thất bại';
+}
+
+function renderSuccess(finalResult, startedAt) {
+    isProcessing = false;
+    const finishedAt = new Date();
+    const totalDuration = ((finishedAt - startedAt) / 1000).toFixed(2);
+
+    updateProgress(100, 'Hoàn tất xử lý thành công!', 'complete');
+    setActivity('Hoàn tất! Ứng dụng đã sẵn sàng chia sẻ.', 'done');
+    progressEndTime.innerText = finishedAt.toLocaleTimeString('vi-VN');
+    progressDuration.innerText = `${totalDuration} giây`;
+
+    document.getElementById('res-icon').src = finalResult.appInfo.icon;
+    document.getElementById('res-name').innerText = finalResult.appInfo.appName;
+    document.getElementById('res-bundle').innerText = finalResult.appInfo.bundleId;
+    document.getElementById('res-version').innerText = `Phiên bản: ${finalResult.appInfo.version} (Build ${finalResult.appInfo.buildNumber})`;
+    document.getElementById('res-link').href = finalResult.downloadUrl;
+    document.getElementById('res-time').innerText = `⏱️ Bắt đầu: ${startedAt.toLocaleTimeString('vi-VN')} • Kết thúc: ${finishedAt.toLocaleTimeString('vi-VN')} • Tổng: ${totalDuration} giây`;
+    shareUrlInput.value = finalResult.shareUrl;
+
+    const qrBox = document.getElementById('qrcode-box');
+    qrBox.innerHTML = '';
+    const qr = qrcode(0, 'M');
+    qr.addData(finalResult.shareUrl);
+    qr.make();
+    const qrImg = document.createElement('img');
+    qrImg.src = qr.createDataURL(8, 0);
+    qrImg.alt = 'Mã QR chia sẻ IPA';
+    qrImg.width = 220;
+    qrImg.height = 220;
+    qrBox.appendChild(qrImg);
+    qrDownloadDataUrl = qrImg.src;
+
+    resultZone.style.display = 'block';
+    loadCatalog();
+}
+
+function finishUpload(xhr, startedAt) {
+    clearInterval(progressTimer);
+
+    const status = xhr.status;
+    const contentType = (xhr.getResponseHeader('content-type') || '').toLowerCase();
+    const rawText = xhr.responseText || '';
+
+    // Proxy/CDN trả về HTML thay vì JSON (quá dung lượng, gateway timeout, mất kết nối...)
+    if (!contentType.includes('application/json')) {
+        let hint;
+        if (status === 413) hint = 'Tệp vượt quá giới hạn dung lượng cho phép (Cloudflare miễn phí giới hạn 100MB mỗi request).';
+        else if (status === 502 || status === 504) hint = 'Máy chủ phản hồi quá lâu (gateway timeout).';
+        else if (status === 0) hint = 'Kết nối tới máy chủ bị gián đoạn giữa chừng.';
+        else hint = `Máy chủ trả về phản hồi không phải JSON (mã ${status}).`;
+        failUpload(`${hint} Vui lòng kiểm tra Log Terminal bên dưới.`);
+        return;
+    }
+
+    let result;
+    try {
+        result = JSON.parse(rawText);
+    } catch (e) {
+        failUpload('Không đọc được phản hồi JSON từ máy chủ.');
+        return;
+    }
+
+    if (status < 200 || status >= 300 || !result.success) {
+        failUpload(result.message || `Lỗi xử lý từ máy chủ (mã ${status}).`);
+        return;
+    }
+
+    renderSuccess(result, startedAt);
+}
+
+function uploadSecure(file) {
     const startedAt = startProcessingUI();
 
-    try {
-        const formData = new FormData();
-        formData.append('ipaFile', file);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload-secure');
+    xhr.responseType = 'text';
+    xhr.timeout = 15 * 60 * 1000; // 15 phút cho file lớn / mạng chậm
 
-        const response = await fetch('/api/upload-secure', {
-            method: 'POST',
-            body: formData
-        });
-
-        clearInterval(progressTimer);
-        updateProgress(95, 'Máy chủ đang hoàn tất xử lý và tạo liên kết chia sẻ...', false);
-
-        const contentType = response.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-            throw new Error("Máy chủ trả về phản hồi lỗi dạng HTML/Văn bản thay vì JSON. Vui lòng kiểm tra Log Terminal bên dưới.");
+    // Tiến trình TẢI LÊN thực tế (ánh xạ 0-90% theo số byte đã gửi)
+    xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+            const uploadedPercent = (e.loaded / e.total) * 100;
+            const mapped = Math.min(uploadedPercent * 0.9, 90);
+            updateProgress(mapped, `Đang tải lên: ${Math.round(uploadedPercent)}% (${formatBytesClient(e.loaded)} / ${formatBytesClient(e.total)})`);
+            setActivity(`Đang truyền dữ liệu lên máy chủ (${formatBytesClient(e.loaded)} / ${formatBytesClient(e.total)})`, 'active');
+        } else {
+            updateProgress(45, 'Đang tải tệp tin lên máy chủ...');
+            setActivity('Đang truyền dữ liệu lên máy chủ', 'active');
         }
+    };
 
-        const finalResult = await response.json();
-
-        if (!finalResult.success) {
-            throw new Error(finalResult.message || 'Lỗi xử lý không xác định từ Server.');
-        }
-
-        const finishedAt = new Date();
-        const totalDuration = ((finishedAt - startedAt) / 1000).toFixed(2);
-
-        updateProgress(100, 'Hoàn tất xử lý thành công!', true);
-        progressEndTime.innerText = finishedAt.toLocaleTimeString('vi-VN');
-        progressDuration.innerText = `${totalDuration} giây`;
-
-        document.getElementById('res-icon').src = finalResult.appInfo.icon;
-        document.getElementById('res-name').innerText = finalResult.appInfo.appName;
-        document.getElementById('res-bundle').innerText = finalResult.appInfo.bundleId;
-        document.getElementById('res-version').innerText = `Phiên bản: ${finalResult.appInfo.version} (Build ${finalResult.appInfo.buildNumber})`;
-        document.getElementById('res-link').href = finalResult.downloadUrl;
-        document.getElementById('res-time').innerText = `⏱️ Bắt đầu: ${startedAt.toLocaleTimeString('vi-VN')} • Kết thúc: ${finishedAt.toLocaleTimeString('vi-VN')} • Tổng: ${totalDuration} giây`;
-        shareUrlInput.value = finalResult.shareUrl;
-
-        const qrBox = document.getElementById('qrcode-box');
-        qrBox.innerHTML = '';
-        const qr = qrcode(0, 'M');
-        qr.addData(finalResult.shareUrl);
-        qr.make();
-        const qrImg = document.createElement('img');
-        qrImg.src = qr.createDataURL(8, 0);
-        qrImg.alt = 'Mã QR chia sẻ IPA';
-        qrImg.width = 220;
-        qrImg.height = 220;
-        qrBox.appendChild(qrImg);
-        qrDownloadDataUrl = qrImg.src;
-
-        resultZone.style.display = 'block';
-
-        // Danh mục vừa được cập nhật ở server, tải lại để hiển thị app mới
-        loadCatalog();
-
-    } catch (err) {
+    // Tải xong toàn bộ file → chờ máy chủ phân tích IPA
+    xhr.upload.onload = () => {
+        updateProgress(92, 'Đã tải lên xong. Máy chủ đang phân tích IPA...');
+        setActivity('Máy chủ đang tiếp nhận và phân tích tệp IPA', 'active');
+        let p = 92;
         clearInterval(progressTimer);
-        updateProgress(0, `❌ Thất bại: ${err.message}`, false);
-        progressFill.style.background = 'var(--danger)';
-        progressDuration.innerText = 'Thất bại';
-    }
+        progressTimer = setInterval(() => {
+            p = Math.min(p + 0.5, 98);
+            updateProgress(p, 'Máy chủ đang phân tích IPA và tạo liên kết chia sẻ...');
+        }, 400);
+    };
+
+    xhr.onload = () => finishUpload(xhr, startedAt);
+    xhr.onerror = () => failUpload('Không thể kết nối tới máy chủ. Kiểm tra kết nối mạng rồi thử lại.');
+    xhr.ontimeout = () => failUpload('Quá thời gian chờ khi tải lên. Tệp có thể quá lớn hoặc mạng quá chậm.');
+    xhr.onabort = () => failUpload('Quá trình tải lên đã bị huỷ.');
+
+    const formData = new FormData();
+    formData.append('ipaFile', file);
+    xhr.send(formData);
 }
 
 copyLinkButton.addEventListener('click', async () => {

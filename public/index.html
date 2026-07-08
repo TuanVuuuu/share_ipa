@@ -48,6 +48,10 @@
             <div class="progress-fill" id="progress-bar-fill"></div>
         </div>
         <div class="status-text" id="status-label">Đang chuẩn bị...</div>
+        <div class="progress-activity" id="progress-activity">
+            <span class="activity-spinner" aria-hidden="true"></span>
+            <span class="activity-text" id="progress-activity-text">Đang khởi tạo tiến trình...</span>
+        </div>
         <div class="progress-metrics">
             <div class="progress-metric">
                 <strong>Bắt đầu</strong>
@@ -92,12 +96,25 @@
 
 <div class="container" id="catalog-container">
     <div class="catalog-head">
-        <h2>Danh mục ứng dụng</h2>
+        <h2 id="catalog-title">Danh mục ứng dụng</h2>
         <button type="button" class="btn secondary" id="catalog-refresh-btn">Làm mới</button>
     </div>
     <p class="catalog-sub" id="catalog-sub">Danh sách các ứng dụng đã xử lý và lưu trữ.</p>
+
     <div id="catalog-list" class="catalog-grid"></div>
     <div id="catalog-empty" class="catalog-empty" style="display:none;">Chưa có ứng dụng nào trong danh mục.</div>
+
+    <div id="catalog-detail" style="display:none;">
+        <button type="button" class="catalog-back" id="catalog-back">← Quay lại danh mục</button>
+        <div class="detail-header">
+            <img src="" alt="icon" class="detail-icon" id="detail-icon">
+            <div class="detail-header-info">
+                <h3 id="detail-name"></h3>
+                <p id="detail-bundle"></p>
+            </div>
+        </div>
+        <div id="detail-builds" class="detail-builds"></div>
+    </div>
 </div>
 
 <div class="log-container" id="terminal-logs">

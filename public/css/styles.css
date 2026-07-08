@@ -75,6 +75,60 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     color: #86868b;
     text-align: center;
 }
+.progress-activity {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: var(--primary-soft);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--primary-dark);
+    min-height: 34px;
+}
+.activity-spinner {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    border: 2px solid rgba(253, 92, 0, 0.25);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: activity-spin 0.7s linear infinite;
+}
+.activity-text {
+    text-align: left;
+    line-height: 1.35;
+}
+.activity-text::after {
+    content: '';
+    animation: activity-dots 1.4s steps(4, end) infinite;
+}
+.progress-activity.done .activity-spinner {
+    border: 2px solid var(--success);
+    border-top-color: var(--success);
+    animation: none;
+}
+.progress-activity.done { background: #eafaef; color: #248a3d; }
+.progress-activity.done .activity-text::after { content: ''; animation: none; }
+.progress-activity.error .activity-spinner {
+    border: 2px solid var(--danger);
+    border-top-color: var(--danger);
+    animation: none;
+}
+.progress-activity.error { background: #fdecea; color: var(--danger); }
+.progress-activity.error .activity-text::after { content: ''; animation: none; }
+@keyframes activity-spin {
+    to { transform: rotate(360deg); }
+}
+@keyframes activity-dots {
+    0% { content: ''; }
+    25% { content: '.'; }
+    50% { content: '..'; }
+    75% { content: '...'; }
+    100% { content: ''; }
+}
 .progress-metrics {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -516,6 +570,122 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     flex: 1;
     padding: 8px 10px;
     font-size: 13px;
+}
+
+/* Thẻ thư mục (bấm để xem tất cả bản build) */
+.folder-card {
+    cursor: pointer;
+    position: relative;
+}
+.folder-card::after {
+    content: '›';
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    font-size: 22px;
+    color: #c7c7cc;
+    line-height: 1;
+}
+.folder-card .view-all-btn {
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+    pointer-events: none; /* cả thẻ đã bấm được */
+}
+
+/* Màn chi tiết: danh sách bản build */
+.catalog-back {
+    border: 0;
+    background: transparent;
+    color: var(--primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    margin-bottom: 16px;
+}
+.catalog-back:hover { text-decoration: underline; }
+.detail-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 16px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #e5e5ea;
+}
+.detail-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 14px;
+    object-fit: cover;
+    border: 1px solid #d2d2d7;
+    flex: 0 0 auto;
+}
+.detail-header-info { min-width: 0; }
+.detail-header-info h3 { margin: 0 0 4px; font-size: 18px; }
+.detail-header-info p {
+    margin: 0;
+    font-size: 13px;
+    color: #86868b;
+    word-break: break-all;
+}
+.detail-builds {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+.build-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid #e5e5ea;
+    border-radius: 12px;
+    padding: 12px 14px;
+}
+.build-info { min-width: 0; }
+.build-info .badge {
+    display: inline-block;
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-weight: 600;
+    font-size: 12px;
+}
+.build-latest {
+    display: inline-block;
+    margin-left: 6px;
+    background: #eafaef;
+    color: #248a3d;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-weight: 600;
+    font-size: 11px;
+}
+.build-sub {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #6b6b70;
+}
+.build-actions {
+    display: flex;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+.build-actions .btn {
+    padding: 8px 12px;
+    font-size: 13px;
+}
+.btn.install-mini {
+    background: var(--primary);
+    color: #fff;
+}
+.btn.install-mini:hover { background: var(--primary-dark); }
+
+@media (max-width: 480px) {
+    .build-row { flex-direction: column; align-items: stretch; }
+    .build-actions .btn { flex: 1; }
 }
 
 /* Modal xem QR */
