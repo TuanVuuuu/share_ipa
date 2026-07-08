@@ -40,9 +40,11 @@ const AUTH_COOKIE_NAME = 'share_ipa_auth';
 
 const UPLOADS_MAIN_DIR = '/Users/sds/dev/share_ipa/uploads';
 const ARCHIVE_STORAGE_DIR = '/Users/sds/dev/share_ipa/storage';
+const CHUNKS_DIR = path.join(UPLOADS_MAIN_DIR, 'chunks');
 
 if (!fs.existsSync(UPLOADS_MAIN_DIR)) fs.mkdirSync(UPLOADS_MAIN_DIR, { recursive: true });
 if (!fs.existsSync(ARCHIVE_STORAGE_DIR)) fs.mkdirSync(ARCHIVE_STORAGE_DIR, { recursive: true });
+if (!fs.existsSync(CHUNKS_DIR)) fs.mkdirSync(CHUNKS_DIR, { recursive: true });
 
 // Tối ưu bộ nhớ: Lưu thẳng file vào đĩa thay vì ngậm trên RAM để tránh crash khi nhiều người upload cùng lúc
 const storage = multer.diskStorage({
@@ -50,6 +52,7 @@ const storage = multer.diskStorage({
     filename: (req, file, cb) => { cb(null, `app_${Date.now()}_${file.originalname}`); }
 });
 const upload = multer({ storage: storage, limits: { fileSize: 200 * 1024 * 1024 } }); // Hạn mức hẳn 200MB
+const chunkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
 function parseCookies(cookieHeader = '') {
     return cookieHeader.split(';').reduce((acc, part) => {
@@ -156,6 +159,8 @@ app.post('/api/logout', (req, res) => {
 
 // Chỉ bảo vệ các API nhạy cảm phía sau
 app.use('/api/upload-secure', requireAuth);
+app.use('/api/upload-chunk', requireAuth);
+app.use('/api/upload-finalize', requireAuth);
 app.use('/api/logs', requireAuth);
 app.use('/api/catalog', requireAuth);
 
@@ -357,17 +362,11 @@ function receiveUpload(req, res, next) {
     });
 }
 
-// Endpoint siêu tốc: Xử lý local, không đẩy file nặng qua bên thứ 3
-app.post('/api/upload-secure', receiveUpload, async (req, res) => {
+// 🧠 HÀM DÙNG CHUNG: bóc tách IPA đã nằm sẵn trên đĩa -> tạo link -> trả phản hồi -> lưu trữ ở nền.
+// Dùng cho cả upload 1 lần (upload-secure) lẫn upload chia nhỏ (upload-finalize).
+async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes }) {
     const startTime = performance.now();
-
-    if (!req.file) {
-        return res.status(400).json({ success: false, message: 'Không tìm thấy tệp tin IPA.' });
-    }
-
-    const finalFilename = req.file.filename;
-    const finalPath = req.file.path;
-    const formattedTotalSize = formatBytes(req.file.size);
+    const formattedTotalSize = formatBytes(fileSizeBytes);
 
     try {
         await logRealtime(`📥 Đã nhận và lưu kho tệp tin (${formattedTotalSize}) thành công vào ổ đĩa Mac!`, 'success');
@@ -389,7 +388,6 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
 
             await logRealtime(`✅ Phân tích cấu trúc thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} trong ${totalProcessTime} giây`, 'success');
 
-            // 🌐 TẠO FILE PLIST (bước bắt buộc cho link cài đặt) — làm trước để trả phản hồi sớm nhất
             const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${PUBLIC_BASE_URL}/uploads/${finalFilename}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
@@ -400,13 +398,10 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
             const manifestUrl = `${PUBLIC_BASE_URL}/uploads/${plistFilename}`;
             const downloadUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
             const shareUrl = `${PUBLIC_BASE_URL}/install?plist=${plistFilename}`;
-
             const uploadedAt = new Date().toISOString();
 
-            await logRealtime(`🎉 Đã tạo xong link cài đặt! Đang hoàn tất lưu trữ ở chế độ nền...`, 'success');
+            await logRealtime('🎉 Đã tạo xong link cài đặt! Đang hoàn tất lưu trữ ở chế độ nền...', 'success');
 
-            // ⚡ TRẢ PHẢN HỒI NGAY để tránh vượt giới hạn timeout 100s của Cloudflare (lỗi 524).
-            // Các việc còn lại (sao lưu, tạo QR, đẩy GitHub) chạy ở nền, không giữ kết nối HTTP.
             res.json({
                 success: true,
                 downloadUrl,
@@ -415,17 +410,15 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
                 appInfo: { ...appInfo, icon: iconBase64 }
             });
 
-            // 🔻 CÔNG VIỆC NỀN (sau khi đã phản hồi client) — có log real-time riêng, lỗi không ảnh hưởng người dùng
             (async () => {
                 try {
-                    // 📁 Phân loại lưu trữ lâu dài
                     const safeAppName = appInfo.appName.replace(/[/\\?%*:|"<>\s]/g, '_');
                     const appStorageDirName = `${safeAppName}_${appInfo.bundleId}`;
                     const targetAppFolder = path.join(ARCHIVE_STORAGE_DIR, appStorageDirName);
 
                     if (!fs.existsSync(targetAppFolder)) fs.mkdirSync(targetAppFolder, { recursive: true });
 
-                    await logRealtime(`🗄️ Đang sao lưu bản build vào kho lưu trữ...`, 'info');
+                    await logRealtime('🗄️ Đang sao lưu bản build vào kho lưu trữ...', 'info');
                     await fs.promises.copyFile(finalPath, path.join(targetAppFolder, finalFilename));
 
                     const metadataInfo = {
@@ -437,7 +430,6 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
                     };
                     await fs.promises.writeFile(path.join(targetAppFolder, `${finalFilename}.json`), JSON.stringify(metadataInfo, null, 4));
 
-                    // 🧹 Kiểm soát dọn dẹp (Giới hạn tối đa 10 bản build gần nhất)
                     const currentFiles = fs.readdirSync(targetAppFolder);
                     const ipaFiles = currentFiles
                         .filter(f => f.endsWith('.ipa'))
@@ -456,7 +448,6 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
                         }
                     }
 
-                    // 🔳 Tạo ảnh QR (data URL) để lưu vĩnh viễn trong danh mục
                     let qrDataUrl = '';
                     try {
                         qrDataUrl = await QRCode.toDataURL(shareUrl, { width: 320, margin: 1 });
@@ -464,7 +455,6 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
                         logToUI(`⚠️ Không tạo được ảnh QR để lưu: ${qrErr.message}`, 'info');
                     }
 
-                    // 🗂️ Lưu bản ghi vào danh mục app trên GitHub
                     const catalogRecord = {
                         id: finalFilename,
                         appName: appInfo.appName,
@@ -488,17 +478,98 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
                     logToUI(`⚠️ Lỗi khi hoàn tất lưu trữ ở nền: ${bgErr.message}`, 'error');
                 }
             })();
-
             return;
-
         } catch (parserError) {
             logToUI(`❌ Trích xuất thông tin IPA thất bại: ${parserError.message}`, 'error');
             return res.status(500).json({ success: false, message: `Lỗi bóc tách cấu trúc file IPA: ${parserError.message}` });
         }
-
     } catch (error) {
         logToUI(`❌ Hệ thống gặp lỗi xử lý: ${error.message}`, 'error');
         return res.status(500).json({ success: false, message: `Lỗi hệ thống Server nội bộ: ${error.message}` });
+    }
+}
+
+// Upload 1 lần (cũ) vẫn giữ lại để tương thích ngược.
+app.post('/api/upload-secure', receiveUpload, async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'Không tìm thấy tệp tin IPA.' });
+    }
+    return processUploadedIpa(res, {
+        finalFilename: req.file.filename,
+        finalPath: req.file.path,
+        fileSizeBytes: req.file.size
+    });
+});
+
+// Upload chunk: mỗi request nhỏ để không chạm timeout 100s của Cloudflare.
+app.post('/api/upload-chunk', chunkUpload.single('chunk'), async (req, res) => {
+    try {
+        const { uploadId = '', chunkIndex = '', totalChunks = '' } = req.body || {};
+        const idx = Number(chunkIndex);
+        const total = Number(totalChunks);
+
+        if (!uploadId || !Number.isInteger(idx) || idx < 0 || !Number.isInteger(total) || total <= 0) {
+            return res.status(400).json({ success: false, message: 'Thiếu hoặc sai metadata chunk.' });
+        }
+        if (!req.file || !req.file.buffer) {
+            return res.status(400).json({ success: false, message: 'Không nhận được dữ liệu chunk.' });
+        }
+
+        const chunkPath = path.join(CHUNKS_DIR, `upload_${uploadId}_${idx}`);
+        await fs.promises.writeFile(chunkPath, req.file.buffer);
+
+        if (idx === 0) {
+            await logRealtime(`🧩 Bắt đầu nhận upload theo chunk (ID: ${uploadId}, tổng ${total} phần)...`, 'info');
+        }
+        if (idx === total - 1) {
+            await logRealtime(`🧩 Đã nhận xong ${total}/${total} chunk. Chuẩn bị ghép tệp...`, 'info');
+        }
+
+        return res.json({ success: true, chunkIndex: idx });
+    } catch (err) {
+        logToUI(`❌ Lỗi nhận chunk: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi nhận chunk: ${err.message}` });
+    }
+});
+
+// Finalize: ghép các chunk thành file IPA hoàn chỉnh rồi đưa vào pipeline xử lý chung.
+app.post('/api/upload-finalize', async (req, res) => {
+    try {
+        const { uploadId = '', totalChunks = '', originalName = '', totalSize = '' } = req.body || {};
+        const total = Number(totalChunks);
+
+        if (!uploadId || !Number.isInteger(total) || total <= 0 || !originalName) {
+            return res.status(400).json({ success: false, message: 'Thiếu thông tin để finalize upload.' });
+        }
+
+        const safeOriginalName = path.basename(originalName).replace(/[^\w.\-]/g, '_');
+        const finalFilename = `app_${Date.now()}_${safeOriginalName}`;
+        const finalPath = path.join(UPLOADS_MAIN_DIR, finalFilename);
+
+        await logRealtime(`🧵 Bắt đầu ghép ${total} chunk thành tệp IPA hoàn chỉnh...`, 'info');
+
+        for (let i = 0; i < total; i++) {
+            const chunkPath = path.join(CHUNKS_DIR, `upload_${uploadId}_${i}`);
+            if (!fs.existsSync(chunkPath)) {
+                return res.status(400).json({ success: false, message: `Thiếu chunk #${i}. Vui lòng upload lại.` });
+            }
+            const buf = await fs.promises.readFile(chunkPath);
+            await fs.promises.appendFile(finalPath, buf);
+            await fs.promises.unlink(chunkPath);
+        }
+
+        const fileStat = await fs.promises.stat(finalPath);
+        const expectedSize = Number(totalSize) || fileStat.size;
+        await logRealtime(`🧵 Ghép chunk hoàn tất (${formatBytes(fileStat.size)}). Chuyển sang xử lý IPA...`, 'success');
+
+        return processUploadedIpa(res, {
+            finalFilename,
+            finalPath,
+            fileSizeBytes: expectedSize
+        });
+    } catch (err) {
+        logToUI(`❌ Lỗi finalize upload chunk: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi ghép chunk: ${err.message}` });
     }
 });
 

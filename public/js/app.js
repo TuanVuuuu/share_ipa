@@ -543,74 +543,111 @@ function armStallWatch() {
     }, 15000);
 }
 
-function uploadSecure(file) {
+async function uploadSecure(file) {
     const startedAt = startProcessingUI();
+    const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB/chunk: đủ nhỏ để mỗi request không chạm timeout 100s
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const uploadId = Date.now().toString() + Math.random().toString(36).slice(2, 8);
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/upload-secure');
-    xhr.responseType = 'text';
-    xhr.timeout = 15 * 60 * 1000; // 15 phút cho file lớn / mạng chậm
-
-    // Mốc đo tốc độ tức thời (làm mượt bằng trung bình trượt)
-    let lastLoaded = 0;
+    let uploadedBytes = 0;
+    let lastBytes = 0;
     let lastTs = performance.now();
     let smoothedBps = 0;
 
-    armStallWatch();
+    const callChunkApi = async (chunkBlob, index) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 45 * 1000); // mỗi chunk tối đa 45s
+        try {
+            const formData = new FormData();
+            formData.append('chunk', chunkBlob, `${file.name}.part${index}`);
+            formData.append('uploadId', uploadId);
+            formData.append('chunkIndex', String(index));
+            formData.append('totalChunks', String(totalChunks));
+            formData.append('originalName', file.name);
 
-    // Tiến trình TẢI LÊN thực tế (ánh xạ 0-90% theo số byte đã gửi)
-    xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-            armStallWatch(); // có byte mới -> reset đồng hồ treo
-
-            const now = performance.now();
-            const deltaBytes = e.loaded - lastLoaded;
-            const deltaSec = (now - lastTs) / 1000;
-
-            if (deltaSec > 0 && deltaBytes >= 0) {
-                const instantBps = deltaBytes / deltaSec;
-                // Trung bình trượt để số không nhảy loạn
-                smoothedBps = smoothedBps === 0 ? instantBps : smoothedBps * 0.7 + instantBps * 0.3;
-                lastLoaded = e.loaded;
-                lastTs = now;
-
-                progressSpeed.innerText = formatSpeed(smoothedBps);
-                const remainingBytes = e.total - e.loaded;
-                progressEta.innerText = smoothedBps > 0 ? formatEta(remainingBytes / smoothedBps) : '--';
+            const res = await fetch('/api/upload-chunk', {
+                method: 'POST',
+                body: formData,
+                signal: controller.signal
+            });
+            const data = await res.json().catch(() => ({ success: false, message: 'Phản hồi không hợp lệ khi upload chunk.' }));
+            if (!res.ok || !data.success) {
+                throw new Error(data.message || `Upload chunk #${index + 1} thất bại.`);
             }
-
-            const uploadedPercent = (e.loaded / e.total) * 100;
-            const mapped = Math.min(uploadedPercent * 0.9, 90);
-            updateProgress(mapped, `Đang tải lên: ${Math.round(uploadedPercent)}% (${formatBytesClient(e.loaded)} / ${formatBytesClient(e.total)})`);
-            setActivity(`Đang truyền dữ liệu lên máy chủ (${formatBytesClient(e.loaded)} / ${formatBytesClient(e.total)}) • ${formatSpeed(smoothedBps)}`, 'active');
-        } else {
-            updateProgress(45, 'Đang tải tệp tin lên máy chủ...');
-            setActivity('Đang truyền dữ liệu lên máy chủ', 'active');
+        } finally {
+            clearTimeout(timeout);
         }
     };
 
-    // Tải xong toàn bộ file → chờ máy chủ phân tích IPA
-    xhr.upload.onload = () => {
+    try {
+        armStallWatch();
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+
+            setActivity(`Đang tải chunk ${i + 1}/${totalChunks} lên máy chủ...`, 'active');
+            await callChunkApi(chunk, i);
+            armStallWatch();
+
+            uploadedBytes = end;
+            const now = performance.now();
+            const deltaBytes = uploadedBytes - lastBytes;
+            const deltaSec = (now - lastTs) / 1000;
+            if (deltaSec > 0 && deltaBytes >= 0) {
+                const instantBps = deltaBytes / deltaSec;
+                smoothedBps = smoothedBps === 0 ? instantBps : smoothedBps * 0.7 + instantBps * 0.3;
+                lastBytes = uploadedBytes;
+                lastTs = now;
+            }
+
+            const uploadedPercent = (uploadedBytes / file.size) * 100;
+            const mapped = Math.min(uploadedPercent * 0.9, 90);
+            updateProgress(mapped, `Đang tải lên: ${Math.round(uploadedPercent)}% (${formatBytesClient(uploadedBytes)} / ${formatBytesClient(file.size)})`);
+            progressSpeed.innerText = formatSpeed(smoothedBps);
+            const remainingBytes = file.size - uploadedBytes;
+            progressEta.innerText = smoothedBps > 0 ? formatEta(remainingBytes / smoothedBps) : '--';
+            setActivity(`Đang truyền dữ liệu lên máy chủ (${formatBytesClient(uploadedBytes)} / ${formatBytesClient(file.size)}) • ${formatSpeed(smoothedBps)}`, 'active');
+        }
+
         clearStallWatch();
         progressEta.innerText = 'Đã tải xong';
-        updateProgress(92, 'Đã tải lên xong. Máy chủ đang phân tích IPA...');
-        setActivity('Máy chủ đang tiếp nhận và phân tích tệp IPA', 'active');
+        updateProgress(92, 'Đã tải lên xong. Máy chủ đang ghép chunk và phân tích IPA...');
+        setActivity('Máy chủ đang ghép các phần tệp và phân tích IPA', 'active');
+
         let p = 92;
         clearInterval(progressTimer);
         progressTimer = setInterval(() => {
             p = Math.min(p + 0.5, 98);
-            updateProgress(p, 'Máy chủ đang phân tích IPA và tạo liên kết chia sẻ...');
+            updateProgress(p, 'Máy chủ đang xử lý IPA và tạo liên kết chia sẻ...');
         }, 400);
-    };
 
-    xhr.onload = () => { clearStallWatch(); finishUpload(xhr, startedAt); };
-    xhr.onerror = () => { clearStallWatch(); failUpload('Không thể kết nối tới máy chủ. Kiểm tra kết nối mạng rồi thử lại.'); };
-    xhr.ontimeout = () => { clearStallWatch(); failUpload('Quá thời gian chờ khi tải lên. Tệp có thể quá lớn hoặc mạng quá chậm.'); };
-    xhr.onabort = () => { clearStallWatch(); failUpload('Quá trình tải lên đã bị huỷ.'); };
+        const finalizeRes = await fetch('/api/upload-finalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uploadId,
+                totalChunks,
+                originalName: file.name,
+                totalSize: file.size
+            })
+        });
 
-    const formData = new FormData();
-    formData.append('ipaFile', file);
-    xhr.send(formData);
+        const result = await finalizeRes.json().catch(() => null);
+        clearInterval(progressTimer);
+        if (!finalizeRes.ok || !result || !result.success) {
+            throw new Error((result && result.message) || `Lỗi xử lý từ máy chủ (mã ${finalizeRes.status}).`);
+        }
+
+        renderSuccess(result, startedAt);
+    } catch (err) {
+        clearInterval(progressTimer);
+        clearStallWatch();
+        const isAbort = err && (err.name === 'AbortError');
+        failUpload(isAbort
+            ? 'Một chunk upload bị timeout (>45s). Mạng quá chậm hoặc proxy đang nghẽn.'
+            : (err.message || 'Không thể kết nối tới máy chủ. Kiểm tra mạng rồi thử lại.'));
+    }
 }
 
 copyLinkButton.addEventListener('click', async () => {
