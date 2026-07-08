@@ -84,6 +84,11 @@ app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
 // Đường dẫn /login cũ giờ trỏ thẳng về trang chính (ô đăng nhập nằm ngay trong trang)
 app.get('/login', (req, res) => res.redirect('/'));
 
+// Trang cài đặt độc lập cho người quét QR (mở màn hình riêng, chỉ hiện 1 bản build)
+app.get('/install', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'install.html'));
+});
+
 // Kiểm tra trạng thái đăng nhập cho frontend
 app.get('/api/auth-status', (req, res) => {
     res.json({ authenticated: isAuthenticated(req) });
@@ -199,6 +204,45 @@ app.get('/api/catalog', async (req, res) => {
     }
 });
 
+// 🌐 Endpoint CÔNG KHAI: trả về thông tin của ĐÚNG MỘT bản build theo plist/id
+// Phục vụ trang cài đặt khi người dùng quét QR (không yêu cầu đăng nhập).
+app.get('/api/app-info', async (req, res) => {
+    try {
+        const rawPlist = (req.query.plist || req.query.id || '').toString();
+        if (!rawPlist) {
+            return res.status(400).json({ success: false, message: 'Thiếu tham số plist.' });
+        }
+
+        // shareUrl dạng ?plist=<finalFilename>.plist, trong khi id trong catalog = <finalFilename>
+        const targetId = rawPlist.replace(/\.plist$/i, '');
+
+        const list = await readCatalog();
+        const record = list.find(item => item.id === targetId);
+
+        if (!record) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy thông tin bản build này.' });
+        }
+
+        // Chỉ trả về thông tin của riêng bản build được yêu cầu
+        return res.json({
+            success: true,
+            item: {
+                appName: record.appName,
+                bundleId: record.bundleId,
+                version: record.version,
+                buildNumber: record.buildNumber,
+                icon: record.icon,
+                fileSize: record.fileSize,
+                uploadedAt: record.uploadedAt,
+                shareUrl: record.shareUrl,
+                downloadUrl: record.downloadUrl
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: `Không tải được thông tin bản build: ${err.message}` });
+    }
+});
+
 app.get('/api/logs', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -291,7 +335,7 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
 
             const manifestUrl = `${PUBLIC_BASE_URL}/uploads/${plistFilename}`;
             const downloadUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
-            const shareUrl = `${PUBLIC_BASE_URL}/?plist=${plistFilename}`;
+            const shareUrl = `${PUBLIC_BASE_URL}/install?plist=${plistFilename}`;
 
             logToUI(`🎉 Toàn bộ quy trình hoàn tất! Sẵn sàng chia sẻ dữ liệu công khai.`, 'success');
 

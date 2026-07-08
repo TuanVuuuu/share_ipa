@@ -1,0 +1,70 @@
+const installIcon = document.getElementById('install-icon');
+const installName = document.getElementById('install-name');
+const installBundle = document.getElementById('install-bundle');
+const installVersion = document.getElementById('install-version');
+const installExtra = document.getElementById('install-extra');
+const installBtn = document.getElementById('install-btn');
+const installHint = document.getElementById('install-hint');
+const installBack = document.getElementById('install-back');
+
+function formatDateTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString('vi-VN');
+}
+
+async function init() {
+    const params = new URLSearchParams(window.location.search);
+    const plistFilename = params.get('plist') || '';
+
+    installBack.href = '/';
+
+    if (!plistFilename) {
+        installName.innerText = 'Thiếu thông tin bản build';
+        installVersion.innerText = 'Liên kết cài đặt không hợp lệ.';
+        installBtn.style.display = 'none';
+        return;
+    }
+
+    // Dựng sẵn link cài đặt từ plist để luôn có nút bấm dù không lấy được metadata
+    const manifestUrl = `${window.location.origin}/uploads/${plistFilename}`;
+    const fallbackDownloadUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
+    installBtn.href = fallbackDownloadUrl;
+
+    try {
+        const res = await fetch(`/api/app-info?plist=${encodeURIComponent(plistFilename)}`);
+        const data = await res.json();
+
+        if (res.ok && data.success && data.item) {
+            const it = data.item;
+            installName.innerText = it.appName || 'Ứng dụng iOS';
+            installBundle.innerText = it.bundleId || '';
+            installVersion.innerText = `Phiên bản: ${it.version} (Build ${it.buildNumber})`;
+            if (it.icon) installIcon.src = it.icon;
+            if (it.downloadUrl) installBtn.href = it.downloadUrl;
+
+            const parts = [];
+            if (it.fileSize) parts.push(`📦 ${it.fileSize}`);
+            if (it.uploadedAt) parts.push(`🕒 ${formatDateTime(it.uploadedAt)}`);
+            installExtra.innerText = parts.join('  •  ');
+        } else {
+            installName.innerText = 'Không tìm thấy thông tin bản build';
+            installVersion.innerText = data.message || 'Bản build có thể đã bị xoá khỏi danh mục.';
+        }
+    } catch (err) {
+        installName.innerText = 'Cài đặt ứng dụng';
+        installVersion.innerText = '';
+    }
+
+    installHint.innerText = 'Nếu iPhone/iPad không tự chuyển qua màn hình cài đặt, hãy bấm "Cài đặt ngay".';
+
+    const isIOS = /iPad|iPhone|iPod/i.test(navigator.userAgent || '');
+    if (isIOS) {
+        setTimeout(() => {
+            try { window.location.href = installBtn.href; } catch (_) { /* ignore */ }
+        }, 1200);
+    }
+}
+
+init();

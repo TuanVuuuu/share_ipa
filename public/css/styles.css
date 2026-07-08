@@ -1,5 +1,7 @@
 :root {
-    --primary: #007aff;
+    --primary: #FD5C00;
+    --primary-soft: #fff3ec;
+    --primary-dark: #d94f00;
     --success: #34c759;
     --danger: #ff3b30;
     --bg: #f5f5f7;
@@ -40,7 +42,7 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 }
 #drop-zone.dragover {
     border-color: var(--primary);
-    background: #f0f7ff;
+    background: var(--primary-soft);
 }
 .progress-container {
     margin-top: 20px;
@@ -212,8 +214,8 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 
 /* Ô đăng nhập nằm ngay trong trang chính */
 .auth-box {
-    border: 1px solid #e5e5ea;
-    background: #f7f9ff;
+    border: 1px solid #f2ddd0;
+    background: var(--primary-soft);
     border-radius: 12px;
     padding: 18px 20px;
     margin-bottom: 20px;
@@ -284,6 +286,35 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     pointer-events: none;
     filter: grayscale(0.2);
     user-select: none;
+}
+
+/* Trang cài đặt độc lập (mở khi quét QR) */
+.install-zone {
+    text-align: center;
+    max-width: 460px;
+}
+.install-zone .app-meta {
+    justify-content: center;
+    margin-bottom: 12px;
+}
+.install-zone .app-details {
+    text-align: left;
+}
+.install-meta {
+    font-size: 13px;
+    color: #6b6b70;
+    margin-bottom: 4px;
+}
+.install-btn {
+    display: block;
+    width: 100%;
+    padding: 14px 20px;
+    font-size: 16px;
+    margin-bottom: 10px;
+}
+.install-zone .btn.secondary {
+    display: inline-block;
+    margin-top: 6px;
 }
 
 /* Danh mục ứng dụng */
@@ -367,8 +398,8 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 }
 .app-card-meta .badge {
     display: inline-block;
-    background: #eef2ff;
-    color: #3b5bdb;
+    background: var(--primary-soft);
+    color: var(--primary-dark);
     border-radius: 6px;
     padding: 2px 8px;
     font-weight: 600;

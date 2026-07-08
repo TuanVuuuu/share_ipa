@@ -1,3 +1,11 @@
+// Tương thích QR cũ: link dạng /?plist=... được chuyển sang trang cài đặt riêng /install
+(function redirectLegacyPlist() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('plist')) {
+        window.location.replace('/install' + window.location.search);
+    }
+})();
+
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 const progressArea = document.getElementById('progress-area');
