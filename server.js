@@ -325,8 +325,40 @@ app.get('/api/logs', (req, res) => {
     });
 });
 
+// Nhận file có bắt lỗi rõ ràng + log tiến trình ra terminal của server để chẩn đoán treo
+const uploadSingle = upload.single('ipaFile');
+function receiveUpload(req, res, next) {
+    const rawLen = Number(req.headers['content-length'] || 0);
+    const humanLen = rawLen ? formatBytes(rawLen) : 'không rõ';
+    const t0 = Date.now();
+    console.log(`[UPLOAD] ⬇️  Bắt đầu nhận request body (Content-Length=${humanLen})`);
+    logToUI(`⬇️ Máy chủ bắt đầu nhận tệp (${humanLen})...`, 'info');
+
+    // Cảnh báo nếu quá lâu chưa nhận xong body (giúp phát hiện nghẽn ở proxy/mạng/đĩa)
+    const slowWatch = setInterval(() => {
+        console.warn(`[UPLOAD] ⏳ Vẫn đang nhận body sau ${((Date.now() - t0) / 1000).toFixed(0)}s...`);
+    }, 10000);
+
+    req.on('aborted', () => {
+        clearInterval(slowWatch);
+        console.error('[UPLOAD] ❌ Client/proxy đã ngắt kết nối giữa chừng (request aborted).');
+        logToUI('❌ Kết nối tải lên bị ngắt giữa chừng (client/proxy đóng kết nối).', 'error');
+    });
+
+    uploadSingle(req, res, (err) => {
+        clearInterval(slowWatch);
+        if (err) {
+            console.error('[UPLOAD] ❌ Lỗi khi nhận tệp:', err.message);
+            logToUI(`❌ Lỗi khi nhận tệp: ${err.message}`, 'error');
+            return res.status(400).json({ success: false, message: `Lỗi nhận tệp: ${err.message}` });
+        }
+        console.log(`[UPLOAD] ✅ Đã nhận xong body sau ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+        next();
+    });
+}
+
 // Endpoint siêu tốc: Xử lý local, không đẩy file nặng qua bên thứ 3
-app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
+app.post('/api/upload-secure', receiveUpload, async (req, res) => {
     const startTime = performance.now();
 
     if (!req.file) {
@@ -357,47 +389,7 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
 
             await logRealtime(`✅ Phân tích cấu trúc thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} trong ${totalProcessTime} giây`, 'success');
 
-            // 📁 Phân loại lưu trữ lâu dài
-            const safeAppName = appInfo.appName.replace(/[/\\?%*:|"<>\s]/g, '_');
-            const appStorageDirName = `${safeAppName}_${appInfo.bundleId}`;
-            const targetAppFolder = path.join(ARCHIVE_STORAGE_DIR, appStorageDirName);
-
-            if (!fs.existsSync(targetAppFolder)) fs.mkdirSync(targetAppFolder, { recursive: true });
-
-            // Sao chép sang bộ lưu trữ song song (bất đồng bộ để không chặn luồng log real-time)
-            await logRealtime(`🗄️ Đang sao lưu bản build vào kho lưu trữ...`, 'info');
-            await fs.promises.copyFile(finalPath, path.join(targetAppFolder, finalFilename));
-
-            // Lưu file cấu hình lịch sử dạng JSON
-            const metadataInfo = {
-                ...appInfo,
-                filename: finalFilename,
-                fileSize: formattedTotalSize,
-                uploadedAt: new Date().toISOString(),
-                processTimeSeconds: totalProcessTime
-            };
-            await fs.promises.writeFile(path.join(targetAppFolder, `${finalFilename}.json`), JSON.stringify(metadataInfo, null, 4));
-
-            // 🧹 Kiểm soát dọn dẹp (Giới hạn tối đa 10 bản build gần nhất)
-            const currentFiles = fs.readdirSync(targetAppFolder);
-            const ipaFiles = currentFiles
-                .filter(f => f.endsWith('.ipa'))
-                .map(f => {
-                    const filePath = path.join(targetAppFolder, f);
-                    return { name: f, path: filePath, ctime: fs.statSync(filePath).ctimeMs };
-                })
-                .sort((a, b) => a.ctime - b.ctime);
-
-            if (ipaFiles.length > 10) {
-                const deleteCount = ipaFiles.length - 10;
-                await logRealtime(`⚠️ Vượt quá 10 bản build. Tiến hành tự động xóa bỏ ${deleteCount} tệp cũ...`, 'info');
-                for (let k = 0; k < deleteCount; k++) {
-                    if (fs.existsSync(ipaFiles[k].path)) fs.unlinkSync(ipaFiles[k].path);
-                    if (fs.existsSync(ipaFiles[k].path + '.json')) fs.unlinkSync(ipaFiles[k].path + '.json');
-                }
-            }
-
-            // 🌐 TẠO FILE PLIST ĐỂ PHỤC VỤ CÀI ĐẶT OTA PUBLIC QUA CLOUDFLARE HTTPS
+            // 🌐 TẠO FILE PLIST (bước bắt buộc cho link cài đặt) — làm trước để trả phản hồi sớm nhất
             const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${PUBLIC_BASE_URL}/uploads/${finalFilename}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
@@ -409,48 +401,95 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
             const downloadUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
             const shareUrl = `${PUBLIC_BASE_URL}/install?plist=${plistFilename}`;
 
-            await logRealtime(`🎉 Toàn bộ quy trình hoàn tất! Sẵn sàng chia sẻ dữ liệu công khai.`, 'success');
+            const uploadedAt = new Date().toISOString();
 
-            // 🔳 Tạo ảnh QR (data URL) từ link cài đặt để lưu vĩnh viễn trong danh mục
-            let qrDataUrl = '';
-            try {
-                qrDataUrl = await QRCode.toDataURL(shareUrl, { width: 320, margin: 1 });
-            } catch (qrErr) {
-                logToUI(`⚠️ Không tạo được ảnh QR để lưu: ${qrErr.message}`, 'info');
-            }
+            await logRealtime(`🎉 Đã tạo xong link cài đặt! Đang hoàn tất lưu trữ ở chế độ nền...`, 'success');
 
-            // 🗂️ Lưu bản ghi vào danh mục app trên GitHub (không chặn nếu lỗi)
-            const catalogRecord = {
-                id: finalFilename,
-                appName: appInfo.appName,
-                bundleId: appInfo.bundleId,
-                version: appInfo.version,
-                buildNumber: appInfo.buildNumber,
-                icon: iconBase64,
-                qr: qrDataUrl,
-                fileSize: formattedTotalSize,
-                shareUrl,
-                downloadUrl,
-                uploadedAt: metadataInfo.uploadedAt,
-                processTimeSeconds: totalProcessTime
-            };
-
-            try {
-                await logRealtime('☁️ Đang đồng bộ thông tin app lên danh mục GitHub...', 'info');
-                await appendToCatalog(catalogRecord);
-                await logRealtime('🗂️ Đã lưu thông tin app vào danh mục trên GitHub.', 'success');
-            } catch (catalogErr) {
-                await logRealtime(`⚠️ Lưu danh mục lên GitHub thất bại: ${catalogErr.message}`, 'error');
-            }
-
-            // Trả phản hồi cho Frontend
-            return res.json({
+            // ⚡ TRẢ PHẢN HỒI NGAY để tránh vượt giới hạn timeout 100s của Cloudflare (lỗi 524).
+            // Các việc còn lại (sao lưu, tạo QR, đẩy GitHub) chạy ở nền, không giữ kết nối HTTP.
+            res.json({
                 success: true,
                 downloadUrl,
                 shareUrl,
                 processTime: totalProcessTime,
                 appInfo: { ...appInfo, icon: iconBase64 }
             });
+
+            // 🔻 CÔNG VIỆC NỀN (sau khi đã phản hồi client) — có log real-time riêng, lỗi không ảnh hưởng người dùng
+            (async () => {
+                try {
+                    // 📁 Phân loại lưu trữ lâu dài
+                    const safeAppName = appInfo.appName.replace(/[/\\?%*:|"<>\s]/g, '_');
+                    const appStorageDirName = `${safeAppName}_${appInfo.bundleId}`;
+                    const targetAppFolder = path.join(ARCHIVE_STORAGE_DIR, appStorageDirName);
+
+                    if (!fs.existsSync(targetAppFolder)) fs.mkdirSync(targetAppFolder, { recursive: true });
+
+                    await logRealtime(`🗄️ Đang sao lưu bản build vào kho lưu trữ...`, 'info');
+                    await fs.promises.copyFile(finalPath, path.join(targetAppFolder, finalFilename));
+
+                    const metadataInfo = {
+                        ...appInfo,
+                        filename: finalFilename,
+                        fileSize: formattedTotalSize,
+                        uploadedAt,
+                        processTimeSeconds: totalProcessTime
+                    };
+                    await fs.promises.writeFile(path.join(targetAppFolder, `${finalFilename}.json`), JSON.stringify(metadataInfo, null, 4));
+
+                    // 🧹 Kiểm soát dọn dẹp (Giới hạn tối đa 10 bản build gần nhất)
+                    const currentFiles = fs.readdirSync(targetAppFolder);
+                    const ipaFiles = currentFiles
+                        .filter(f => f.endsWith('.ipa'))
+                        .map(f => {
+                            const filePath = path.join(targetAppFolder, f);
+                            return { name: f, path: filePath, ctime: fs.statSync(filePath).ctimeMs };
+                        })
+                        .sort((a, b) => a.ctime - b.ctime);
+
+                    if (ipaFiles.length > 10) {
+                        const deleteCount = ipaFiles.length - 10;
+                        await logRealtime(`⚠️ Vượt quá 10 bản build. Tiến hành tự động xóa bỏ ${deleteCount} tệp cũ...`, 'info');
+                        for (let k = 0; k < deleteCount; k++) {
+                            if (fs.existsSync(ipaFiles[k].path)) fs.unlinkSync(ipaFiles[k].path);
+                            if (fs.existsSync(ipaFiles[k].path + '.json')) fs.unlinkSync(ipaFiles[k].path + '.json');
+                        }
+                    }
+
+                    // 🔳 Tạo ảnh QR (data URL) để lưu vĩnh viễn trong danh mục
+                    let qrDataUrl = '';
+                    try {
+                        qrDataUrl = await QRCode.toDataURL(shareUrl, { width: 320, margin: 1 });
+                    } catch (qrErr) {
+                        logToUI(`⚠️ Không tạo được ảnh QR để lưu: ${qrErr.message}`, 'info');
+                    }
+
+                    // 🗂️ Lưu bản ghi vào danh mục app trên GitHub
+                    const catalogRecord = {
+                        id: finalFilename,
+                        appName: appInfo.appName,
+                        bundleId: appInfo.bundleId,
+                        version: appInfo.version,
+                        buildNumber: appInfo.buildNumber,
+                        icon: iconBase64,
+                        qr: qrDataUrl,
+                        fileSize: formattedTotalSize,
+                        shareUrl,
+                        downloadUrl,
+                        uploadedAt,
+                        processTimeSeconds: totalProcessTime
+                    };
+
+                    await logRealtime('☁️ Đang đồng bộ thông tin app lên danh mục GitHub...', 'info');
+                    await appendToCatalog(catalogRecord);
+                    await logRealtime('🗂️ Đã lưu xong danh mục. Toàn bộ quy trình hoàn tất!', 'success');
+                } catch (bgErr) {
+                    console.error('[BACKGROUND] Lỗi xử lý nền:', bgErr.message);
+                    logToUI(`⚠️ Lỗi khi hoàn tất lưu trữ ở nền: ${bgErr.message}`, 'error');
+                }
+            })();
+
+            return;
 
         } catch (parserError) {
             logToUI(`❌ Trích xuất thông tin IPA thất bại: ${parserError.message}`, 'error');
