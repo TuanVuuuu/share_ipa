@@ -15,6 +15,10 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.i
 const CATALOG_PATH = 'catalog.json';       // Chỉ mục danh sách app trên repo lưu trữ
 const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ lại trong danh mục
 
+// 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
+// Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
+const ASSET_VERSION = process.env.ASSET_VERSION || '2';
+
 console.log('========== ENV ==========');
 console.log('__dirname:', __dirname);
 console.log('cwd:', process.cwd());
@@ -76,8 +80,36 @@ function requireAuth(req, res, next) {
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Trả về file HTML kèm chèn version cho asset (thay __V__ bằng ASSET_VERSION) để phá cache
+function sendHtmlWithVersion(res, fileName) {
+    const filePath = path.join(__dirname, 'public', fileName);
+    fs.readFile(filePath, 'utf8', (err, html) => {
+        if (err) {
+            res.status(404).send('Not found');
+            return;
+        }
+        const rendered = html.replace(/__V__/g, ASSET_VERSION);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.send(rendered);
+    });
+}
+
+// Các trang HTML được phục vụ động (chèn version) — đặt TRƯỚC express.static để ưu tiên
+app.get('/', (req, res) => sendHtmlWithVersion(res, 'index.html'));
+
 // Trang chính và tài nguyên tĩnh mở tự do (không bắt buộc đăng nhập)
-app.use(express.static('public'));
+// HTML luôn tải mới, các asset (.js/.css) revalidate để tránh phục vụ bản cũ sau khi deploy
+app.use(express.static('public', {
+    etag: true,
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        } else {
+            res.setHeader('Cache-Control', 'no-cache');
+        }
+    }
+}));
 app.use('/uploads', express.static(UPLOADS_MAIN_DIR));
 app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
 
@@ -85,9 +117,7 @@ app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
 app.get('/login', (req, res) => res.redirect('/'));
 
 // Trang cài đặt độc lập cho người quét QR (mở màn hình riêng, chỉ hiện 1 bản build)
-app.get('/install', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'install.html'));
-});
+app.get('/install', (req, res) => sendHtmlWithVersion(res, 'install.html'));
 
 // Kiểm tra trạng thái đăng nhập cho frontend
 app.get('/api/auth-status', (req, res) => {
