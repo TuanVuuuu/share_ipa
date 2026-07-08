@@ -1,17 +1,114 @@
+const path = require('path');
+
+require('dotenv').config({
+    path: path.join(__dirname, '.env')
+});
+
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
-const path = require('path');
 const AppInfoParser = require('app-info-parser');
+
+console.log('========== ENV ==========');
+console.log('__dirname:', __dirname);
+console.log('cwd:', process.cwd());
+
+console.log('ACCESS_USERNAME:', process.env.ACCESS_USERNAME);
+console.log('ACCESS_PASSWORD:', process.env.ACCESS_PASSWORD);
+
+console.log('USERNAME:', process.env.USERNAME);
+console.log('PASSWORD:', process.env.PASSWORD);
+
+console.log('=========================');
 
 const app = express();
 const PORT = 3000;
+const AUTH_COOKIE_NAME = 'share_ipa_auth';
 
 const UPLOADS_MAIN_DIR = '/Users/sds/dev/share_ipa/uploads';
-const CHUNK_DIR = '/Users/sds/dev/share_ipa/uploads/chunks';
+const ARCHIVE_STORAGE_DIR = '/Users/sds/dev/share_ipa/storage';
 
 if (!fs.existsSync(UPLOADS_MAIN_DIR)) fs.mkdirSync(UPLOADS_MAIN_DIR, { recursive: true });
-if (!fs.existsSync(CHUNK_DIR)) fs.mkdirSync(CHUNK_DIR, { recursive: true });
+if (!fs.existsSync(ARCHIVE_STORAGE_DIR)) fs.mkdirSync(ARCHIVE_STORAGE_DIR, { recursive: true });
+
+// Tối ưu bộ nhớ: Lưu thẳng file vào đĩa thay vì ngậm trên RAM để tránh crash khi nhiều người upload cùng lúc
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => { cb(null, UPLOADS_MAIN_DIR); },
+    filename: (req, file, cb) => { cb(null, `app_${Date.now()}_${file.originalname}`); }
+});
+const upload = multer({ storage: storage, limits: { fileSize: 200 * 1024 * 1024 } }); // Hạn mức hẳn 200MB
+
+function parseCookies(cookieHeader = '') {
+    return cookieHeader.split(';').reduce((acc, part) => {
+        const [rawKey, ...rawValue] = part.trim().split('=');
+        if (!rawKey) return acc;
+        acc[decodeURIComponent(rawKey)] = decodeURIComponent(rawValue.join('='));
+        return acc;
+    }, {});
+}
+
+function getConfiguredCredentials() {
+    return {
+        username: process.env.ACCESS_USERNAME?.trim() || '',
+        password: process.env.ACCESS_PASSWORD?.trim() || ''
+    };
+}
+
+function requireAuth(req, res, next) {
+    console.log("COOKIE =", req.headers.cookie);
+    if (req.path === '/login' || req.path === '/api/login') return next();
+
+    const cookies = parseCookies(req.headers.cookie || '');
+    if (cookies[AUTH_COOKIE_NAME] === 'true') return next();
+
+    if (req.path.startsWith('/api/')) {
+        return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập trước khi sử dụng.' });
+    }
+
+    return res.redirect('/login');
+}
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.post('/login', (req, res) => {
+    console.log('===== LOGIN =====');
+    console.log(req.body);
+
+    const { username = '', password = '' } = req.body || {};
+    const configured = getConfiguredCredentials();
+
+    console.log('Typed Username:', username);
+    console.log('Typed Password:', password);
+
+    console.log('Config Username:', configured.username);
+    console.log('Config Password:', configured.password);
+    console.log('=================');
+
+    const typedUsername = username.toString().trim();
+    const typedPassword = password.toString().trim();
+
+    if (typedUsername === configured.username &&
+        typedPassword === configured.password) {
+
+        res.setHeader(
+            'Set-Cookie',
+            `${AUTH_COOKIE_NAME}=true; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
+        );
+
+        return res.redirect('/');
+    }
+
+    return res.redirect('/login?error=1');
+});
+
+app.use(requireAuth);
+app.use(express.static('public'));
+app.use('/uploads', express.static(UPLOADS_MAIN_DIR));
+app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
 
 const systemLogs = [];
 let logClients = [];
@@ -33,12 +130,6 @@ function formatBytes(bytes, decimals = 2) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
-
-app.use(express.static('public'));
-app.use('/uploads', express.static('uploads'));
-
 app.get('/api/logs', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -50,95 +141,107 @@ app.get('/api/logs', (req, res) => {
     req.on('close', () => { logClients = logClients.filter(client => client.id !== clientId); });
 });
 
-app.post('/upload-ipa-chunk', upload.single('ipaChunk'), async (req, res) => {
+// Endpoint siêu tốc: Xử lý local, không đẩy file nặng qua bên thứ 3
+app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
+    const startTime = performance.now();
+
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'Không tìm thấy tệp tin IPA.' });
+    }
+
+    const finalFilename = req.file.filename;
+    const finalPath = req.file.path;
+    const formattedTotalSize = formatBytes(req.file.size);
+
     try {
-        const { chunkIndex, totalChunks, uploadId, originalName, totalSize, chunkSize } = req.body;
-        
-        if (!uploadId || chunkIndex === undefined) {
-            return res.status(400).json({ success: false, message: 'Dữ liệu phân mảnh bị thiếu.' });
-        }
-
-        const formattedTotalSize = formatBytes(parseInt(totalSize));
-        const formattedChunkSize = formatBytes(parseInt(chunkSize));
-        const currentChunkNum = parseInt(chunkIndex) + 1;
-
-        logToUI(`📥 [Mảnh ${currentChunkNum}/${totalChunks}] Đang ghi mảnh ~${formattedChunkSize} (Tổng file IPA: ${formattedTotalSize})`, 'info');
-
-        const thisChunkPath = path.join(CHUNK_DIR, `${uploadId}_${chunkIndex}`);
-        fs.writeFileSync(thisChunkPath, req.file.buffer);
-
-        const files = fs.readdirSync(CHUNK_DIR);
-        const uploadedChunksForThisFile = files.filter(file => file.startsWith(uploadId));
-
-        if (uploadedChunksForThisFile.length < parseInt(totalChunks)) {
-            return res.json({ success: true });
-        }
-
-        // --- ĐỦ MẢNH -> TIẾN HÀNH HỢP NHẤT ---
-        const startTime = performance.now();
-        logToUI(`📦 Đã xác nhận đủ ${totalChunks}/${totalChunks} mảnh trên đĩa. Bắt đầu hợp nhất...`, 'info');
-
-        const finalFilename = `app_${Date.now()}_${originalName}`;  
-        const finalPath = path.join(UPLOADS_MAIN_DIR, finalFilename);
-
-        for (let i = 0; i < totalChunks; i++) {
-            const chunkPath = path.join(CHUNK_DIR, `${uploadId}_${i}`);
-            if (!fs.existsSync(chunkPath)) {
-                throw new Error(`Mất mát dữ liệu mảnh số ${i}`);
-            }
-            const buffer = fs.readFileSync(chunkPath);
-            fs.appendFileSync(finalPath, buffer); 
-            fs.unlinkSync(chunkPath); 
-        }
-
-        logToUI(`⚡ Hợp nhất hoàn tất. Tiến hành trích xuất metadata IPA qua AppInfoParser...`, 'info');
-        
-        // 🌟 TỰ ĐỘNG ÉP HTTPS CHO DOMAIN PUBLIC KHI SINH LINK CHO IPHONE
-        const host = req.get('host');
-        const PUBLIC_DOMAIN = host.includes('share-ipa.vunt.info') ? 'https://share-ipa.vunt.info' : `http://${host}`;
+        logToUI(`📥 Đã nhận và lưu kho tệp tin (${formattedTotalSize}) thành công vào ổ đĩa Mac!`, 'success');
+        logToUI(`⚡ Bắt đầu bóc tách Metadata IPA bằng AppInfoParser...`, 'info');
 
         const parser = new AppInfoParser(finalPath);
 
-        parser.parse()
-            .then(result => {
-                const appInfo = {
-                    bundleId: result.CFBundleIdentifier || 'N/A',
-                    version: result.CFBundleShortVersionString || 'N/A',
-                    buildNumber: result.CFBundleVersion || 'N/A',
-                    appName: result.CFBundleDisplayName || result.CFBundleName || 'Ứng dụng iOS'
-                };
-                const iconBase64 = result.icon || 'https://cdn-icons-png.flaticon.com/512/5115/5115293.png';
-                const processTime = ((performance.now() - startTime) / 1000).toFixed(2);
+        try {
+            const result = await parser.parse();
+            const appInfo = {
+                bundleId: result.CFBundleIdentifier || 'com.unknown.app',
+                version: result.CFBundleShortVersionString || '1.0.0',
+                buildNumber: result.CFBundleVersion || '1',
+                appName: result.CFBundleDisplayName || result.CFBundleName || 'Ứng dụng iOS'
+            };
 
-                logToUI(`✅ Phân tích thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} trong ${processTime}s`, 'success');
+            const iconBase64 = result.icon || 'https://cdn-icons-png.flaticon.com/512/5115/5115293.png';
+            const totalProcessTime = ((performance.now() - startTime) / 1000).toFixed(2);
 
-                const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
+            logToUI(`✅ Phân tích cấu trúc thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} trong ${totalProcessTime} giây`, 'success');
+
+            // 📁 Phân loại lưu trữ lâu dài
+            const safeAppName = appInfo.appName.replace(/[/\\?%*:|"<>\s]/g, '_');
+            const appStorageDirName = `${safeAppName}_${appInfo.bundleId}`;
+            const targetAppFolder = path.join(ARCHIVE_STORAGE_DIR, appStorageDirName);
+
+            if (!fs.existsSync(targetAppFolder)) fs.mkdirSync(targetAppFolder, { recursive: true });
+
+            // Sao chép sang bộ lưu trữ lưu trữ song song
+            fs.copyFileSync(finalPath, path.join(targetAppFolder, finalFilename));
+
+            // Lưu file cấu hình lịch sử dạng JSON
+            const metadataInfo = {
+                ...appInfo,
+                filename: finalFilename,
+                fileSize: formattedTotalSize,
+                uploadedAt: new Date().toISOString(),
+                processTimeSeconds: totalProcessTime
+            };
+            fs.writeFileSync(path.join(targetAppFolder, `${finalFilename}.json`), JSON.stringify(metadataInfo, null, 4));
+
+            // 🧹 Kiểm soát dọn dẹp (Giới hạn tối đa 10 bản build gần nhất)
+            const currentFiles = fs.readdirSync(targetAppFolder);
+            const ipaFiles = currentFiles
+                .filter(f => f.endsWith('.ipa'))
+                .map(f => {
+                    const filePath = path.join(targetAppFolder, f);
+                    return { name: f, path: filePath, ctime: fs.statSync(filePath).ctimeMs };
+                })
+                .sort((a, b) => a.ctime - b.ctime);
+
+            if (ipaFiles.length > 10) {
+                const deleteCount = ipaFiles.length - 10;
+                logToUI(`⚠️ Vượt quá 10 bản build. Tiến hành tự động xóa bỏ ${deleteCount} tệp cũ...`, 'info');
+                for (let k = 0; k < deleteCount; k++) {
+                    if (fs.existsSync(ipaFiles[k].path)) fs.unlinkSync(ipaFiles[k].path);
+                    if (fs.existsSync(ipaFiles[k].path + '.json')) fs.unlinkSync(ipaFiles[k].path + '.json');
+                }
+            }
+
+            // 🌐 TẠO FILE PLIST ĐỂ PHỤC VỤ CÀI ĐẶT OTA PUBLIC QUA CLOUDFLARE HTTPS
+            const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>https://share-ipa.vunt.info/uploads/${finalFilename}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
 
-                const plistFilename = `${finalFilename}.plist`;
-                fs.writeFileSync(path.join(UPLOADS_MAIN_DIR, plistFilename), plistContent);
+            const plistFilename = `${finalFilename}.plist`;
+            fs.writeFileSync(path.join(UPLOADS_MAIN_DIR, plistFilename), plistContent);
 
-                res.json({
-                    success: true,
-                    // Ép mã QR luôn luôn sinh ra link https public để iPhone của các tầng quét cài được
-                    downloadUrl: `itms-services://?action=download-manifest&url=${encodeURIComponent(`https://share-ipa.vunt.info/uploads/${plistFilename}`)}`,
-                    shareUrl: `https://share-ipa.vunt.info/?plist=${plistFilename}`,
-                    processTime: processTime,
-                    appInfo: { ...appInfo, icon: iconBase64 }
-                });
-            })
-            .catch(err => {
-                logToUI(`❌ Trích xuất file IPA thất bại: ${err.message}`, 'error');
-                res.status(500).json({ success: false, message: 'Lỗi giải mã file IPA.' });
+            logToUI(`🎉 Toàn bộ quy trình hoàn tất! Sẵn sàng chia sẻ dữ liệu công khai.`, 'success');
+
+            // Trả phản hồi ngay lập tức cho Frontend
+            return res.json({
+                success: true,
+                downloadUrl: `itms-services://?action=download-manifest&url=${encodeURIComponent(`https://share-ipa.vunt.info/uploads/${plistFilename}`)}`,
+                shareUrl: `https://share-ipa.vunt.info/?plist=${plistFilename}`,
+                processTime: totalProcessTime,
+                appInfo: { ...appInfo, icon: iconBase64 }
             });
 
+        } catch (parserError) {
+            logToUI(`❌ Trích xuất thông tin IPA thất bại: ${parserError.message}`, 'error');
+            return res.status(500).json({ success: false, message: `Lỗi bóc tách cấu trúc file IPA: ${parserError.message}` });
+        }
+
     } catch (error) {
-        logToUI(`❌ Khóa luồng ghi, lỗi hệ thống: ${error.message}`, 'error');
-        res.status(500).json({ success: false, message: error.message });
+        logToUI(`❌ Hệ thống gặp lỗi xử lý: ${error.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi hệ thống Server nội bộ: ${error.message}` });
     }
 });
 
-const server = app.listen(PORT, () => console.log(`Diawi Server Active on port ${PORT}`));
+const server = app.listen(PORT, () => console.log(`Diawi Local-First System active on port ${PORT}`));
 server.timeout = 600000;
 server.keepAliveTimeout = 600000;

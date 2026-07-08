@@ -10,6 +10,7 @@ yarn.lock
 
 # Uploads and user files
 uploads/
+storage/
 
 # OS files
 .DS_Store

@@ -2,235 +2,436 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Internal Distribute Engine</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Chia Sẻ Ứng Dụng IPA Nội Bộ</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #f4f6f9; color: #333;}
-        h1 { color: #222; margin-bottom: 30px; font-weight: 800;}
-        #drop-zone { max-width: 550px; margin: 0 auto; padding: 50px 20px; border: 3px dashed #007aff; background: white; border-radius: 16px; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 12px rgba(0,0,0,0.03); font-weight: 500;}
-        #drop-zone.hover { background: #e3efff; border-color: #0056b3; }
-        
-        #progress-container { max-width: 550px; margin: 20px auto 0 auto; display: none; background: #e9ecef; border-radius: 8px; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,0.1); position: relative;}
-        #progress-bar { width: 0%; height: 25px; background-color: #007aff; text-align: center; line-height: 25px; color: white; font-size: 12px; font-weight: bold; transition: width 0.1s ease; white-space: nowrap;}
-        #speed-eta { font-size: 11px; color: #666; margin-top: 5px; font-family: monospace; display: none;}
-
-        #result { margin-top: 30px; display: none; background: white; padding: 30px; border-radius: 16px; max-width: 450px; margin-left: auto; margin-right: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: left;}
-        #result h3 { text-align: center; margin-top: 0; color: #28a745; font-size: 20px;}
-        
-        .app-meta-box { display: flex; align-items: center; background: #f8f9fa; padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #eee; }
-        .app-icon { width: 70px; height: 70px; border-radius: 14px; margin-right: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); object-fit: cover; background: #fff;}
-        .app-details { flex: 1; }
-        .app-name { font-size: 18px; font-weight: bold; margin: 0 0 4px 0; color: #111; }
-        .app-info-line { font-size: 13px; color: #666; margin: 2px 0; }
-        .app-info-line strong { color: #333; }
-
-        .benchmark-time { text-align: center; font-size: 13px; color: #6c757d; background: #e9ecef; padding: 6px 12px; border-radius: 20px; width: fit-content; margin: 0 auto 20px auto; font-family: monospace;}
-
-        #qr-container { text-align: center; }
-        #qr-container canvas, #qr-container img { margin: 15px auto; display: block; border: 4px solid #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
-        
-        .share-box { margin-top: 20px; background: #f1f3f5; padding: 12px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; }
-        .share-input { flex: 1; border: none; background: transparent; font-size: 13px; color: #495057; outline: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px;}
-        .copy-btn { background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: bold; transition: background 0.2s;}
-        .copy-btn:hover { background: #495057; }
-
-        .btn-install { display: block; text-align: center; padding: 14px; background: #007aff; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px; box-shadow: 0 4px 12px rgba(0,122,255,0.3); transition: background 0.2s;}
-        .btn-install:hover { background: #0056b3; }
-
-        #log-panel { max-width: 550px; margin: 35px auto 0 auto; background: #1e1e1e; border-radius: 12px; padding: 15px; text-align: left; box-shadow: 0 8px 20px rgba(0,0,0,0.15); border: 1px solid #333;}
-        #log-panel h4 { margin: 0 0 10px 0; color: #aaa; font-size: 13px; font-family: monospace; display: flex; justify-content: space-between; letter-spacing: 0.5px;}
-        #log-container { height: 180px; overflow-y: auto; font-family: 'Courier New', Courier, monospace; font-size: 12px; line-height: 1.6; color: #ddd; }
-        .log-item { margin-bottom: 4px; word-break: break-all; }
-        .log-time { color: #888; margin-right: 8px; }
-        .log-info { color: #00d2ff; }
-        .log-success { color: #2ecc71; font-weight: bold;}
-        .log-error { color: #e74c3c; font-weight: bold; background: rgba(231,76,60,0.1); padding: 2px 4px; border-radius: 3px;}
+        :root {
+            --primary: #007aff;
+            --success: #34c759;
+            --danger: #ff3b30;
+            --bg: #f5f5f7;
+            --card: #ffffff;
+            --text: #1d1d1f;
+        }
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 650px;
+            background: var(--card);
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.04);
+            margin-bottom: 20px;
+        }
+        h2 { text-align: center; margin-top: 0; font-weight: 600; }
+        #drop-zone {
+            border: 2px dashed #d2d2d7;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: #fafafa;
+        }
+        #drop-zone.dragover {
+            border-color: var(--primary);
+            background: #f0f7ff;
+        }
+        .progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #4c4c52;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: #e5e5ea;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--primary);
+            transition: width 0.25s ease;
+        }
+        .status-text {
+            font-size: 14px;
+            margin-top: 8px;
+            color: #86868b;
+            text-align: center;
+        }
+        .progress-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #666;
+        }
+        .progress-metric {
+            background: #f7f7f8;
+            border-radius: 10px;
+            padding: 8px 10px;
+        }
+        .progress-metric strong {
+            display: block;
+            margin-bottom: 2px;
+            color: var(--text);
+        }
+        #result-zone {
+            margin-top: 25px;
+            display: none;
+            padding: 20px;
+            border-radius: 12px;
+            background: #fdfdfd;
+            border: 1px solid #e5e5ea;
+        }
+        .app-meta {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .app-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 14px;
+            object-fit: cover;
+            border: 1px solid #d2d2d7;
+        }
+        .app-details h3 { margin: 0 0 4px 0; font-size: 18px; }
+        .app-details p { margin: 0; color: #86868b; font-size: 14px; }
+        .qr-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            margin-top: 15px;
+        }
+        .qr-code img {
+            padding: 10px;
+            background: white;
+            border: 1px solid #e5e5ea;
+            border-radius: 8px;
+        }
+        .url-box {
+            width: 100%;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            background: #f7f7f8;
+            border: 1px solid #e5e5ea;
+            border-radius: 10px;
+            padding: 8px 10px;
+        }
+        .url-box input {
+            flex: 1;
+            border: 0;
+            outline: none;
+            background: transparent;
+            font-size: 13px;
+            color: var(--text);
+        }
+        .action-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: var(--primary);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 14px;
+            text-align: center;
+            border: 0;
+            cursor: pointer;
+        }
+        .btn.secondary {
+            background: #f2f2f7;
+            color: var(--text);
+        }
+        .log-container {
+            width: 100%;
+            max-width: 650px;
+            background: #1e1e1e;
+            color: #a9b7c6;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 12px;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+            height: 250px;
+            overflow-y: auto;
+        }
+        .log-line { margin-bottom: 4px; line-height: 1.4; }
+        .log-info { color: #a9b7c6; }
+        .log-success { color: #629755; font-weight: bold; }
+        .log-error { color: #bc3f3c; font-weight: bold; }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
-    <h1>Trang Tải Lên IPA Nội Bộ (Diawi Alternative)</h1>
-    <div id="drop-zone">Kéo & Thả file .ipa vào đây hoặc click để chọn file</div>
-    <input type="file" id="file-input" accept=".ipa" style="display: none;">
 
-    <div id="progress-container">
-        <div id="progress-bar">0%</div>
+<div class="container">
+    <h2>Phân Phối Ứng Dụng IPA Nội Bộ</h2>
+    
+    <div id="drop-zone">
+        <p>Kéo và thả file <b>.ipa</b> vào đây hoặc bấm để chọn tệp</p>
+        <input type="file" id="file-input" accept=".ipa" style="display: none;">
     </div>
-    <div id="speed-eta">Tốc độ: -- KB/s | Còn lại: --s</div>
 
-    <div id="result">
-        <h3>🎉 Đã xử lý xong bản build!</h3>
-        <div class="benchmark-time">⏱️ Thời gian giải nén hệ thống: <span id="info-time">0.00</span>s</div>
-
-        <div class="app-meta-box">
-            <img id="info-icon" class="app-icon" src="" alt="App Icon">
-            <div class="app-details">
-                <p id="info-name" class="app-name">N/A</p>
-                <p class="app-info-line"><strong>Bundle ID:</strong> <span id="info-bundle">N/A</span></p>
-                <p class="app-info-line"><strong>Version:</strong> <span id="info-version">N/A</span></p>
-                <p class="app-info-line"><strong>Build Number:</strong> <span id="info-build">N/A</span></p>
+    <div class="progress-container" id="progress-area">
+        <div class="progress-header">
+            <span id="progress-percent">0%</span>
+            <span>Đang xử lý</span>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-bar-fill"></div>
+        </div>
+        <div class="status-text" id="status-label">Đang chuẩn bị...</div>
+        <div class="progress-metrics">
+            <div class="progress-metric">
+                <strong>Bắt đầu</strong>
+                <span id="progress-start-time">Đang chờ...</span>
+            </div>
+            <div class="progress-metric">
+                <strong>Kết thúc</strong>
+                <span id="progress-end-time">Đang chờ...</span>
+            </div>
+            <div class="progress-metric">
+                <strong>Tổng thời gian</strong>
+                <span id="progress-duration">--</span>
             </div>
         </div>
+    </div>
 
-        <div id="qr-container"></div>
-        <p style="text-align: center; font-size: 14px; color: #666; margin-bottom: 5px;">Quét mã bằng Camera iPhone để cài trực tiếp</p>
-        
-        <div class="share-box">
-            <input type="text" id="share-url-input" class="share-input" readonly value="">
-            <button onclick="copyShareUrl()" id="btn-copy" class="copy-btn">Copy Link</button>
+    <div id="result-zone">
+        <div class="app-meta">
+            <img src="" alt="App Icon" class="app-icon" id="res-icon">
+            <div class="app-details">
+                <h3 id="res-name">Tên ứng dụng</h3>
+                <p id="res-bundle">com.vunt.app</p>
+                <p id="res-version">Phiên bản: 1.0.0 (Build 1)</p>
+            </div>
         </div>
-        <a id="install-link" href="#" class="btn-install">Bấm cài đặt trực tiếp từ Safari</a>
+        <hr style="border: 0; border-top: 1px solid #e5e5ea; margin: 15px 0;">
+        <div class="qr-wrapper">
+            <div class="qr-code" id="qrcode-box"></div>
+            <p style="font-size: 13px; color: #86868b; text-align: center; margin: 0;">Quét mã QR bằng Camera của iPhone để cài đặt ứng dụng</p>
+            <div class="url-box">
+                <input type="text" id="share-url" readonly value="">
+                <button type="button" class="btn secondary" id="copy-link-btn">Sao chép</button>
+            </div>
+            <div class="action-row">
+                <a href="#" id="res-link" class="btn">Mở liên kết cài đặt</a>
+                <button type="button" class="btn secondary" id="download-qr-btn">Tải QR code</button>
+            </div>
+            <div id="res-time" style="font-size: 12px; color: #34c759; margin-top: 5px;"></div>
+        </div>
     </div>
+</div>
 
-    <div id="log-panel">
-        <h4><span>🖥️ REAL-TIME SYSTEM TERMINAL LOGS</span></h4>
-        <div id="log-container"></div>
+<div class="log-container" id="terminal-logs">
+    <div style="color: #34c759; border-bottom: 1px solid #333; padding-bottom: 5px; margin-bottom: 8px; font-weight: bold;">
+        🖥️ REAL-TIME SYSTEM TERMINAL LOGS
     </div>
+</div>
 
-    <script>
-        const dropZone = document.getElementById('drop-zone');
-        const fileInput = document.getElementById('file-input');
-        const resultDiv = document.getElementById('result');
-        const progressContainer = document.getElementById('progress-container');
-        const progressBar = document.getElementById('progress-bar');
-        const speedEtaText = document.getElementById('speed-eta');
+<script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const progressArea = document.getElementById('progress-area');
+    const progressFill = document.getElementById('progress-bar-fill');
+    const progressPercent = document.getElementById('progress-percent');
+    const statusLabel = document.getElementById('status-label');
+    const progressStartTime = document.getElementById('progress-start-time');
+    const progressEndTime = document.getElementById('progress-end-time');
+    const progressDuration = document.getElementById('progress-duration');
+    const resultZone = document.getElementById('result-zone');
+    const logsContainer = document.getElementById('terminal-logs');
+    const shareUrlInput = document.getElementById('share-url');
+    const copyLinkButton = document.getElementById('copy-link-btn');
+    const downloadQrButton = document.getElementById('download-qr-btn');
+    let progressTimer = null;
+    let qrDownloadDataUrl = '';
 
-        dropZone.onclick = () => fileInput.click();
-        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('hover'); };
-        dropZone.ondragleave = () => dropZone.classList.remove('hover');
-        dropZone.ondrop = (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('hover');
-            if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files[0]);
-        };
-        fileInput.onchange = () => { if (fileInput.files.length) handleUpload(fileInput.files[0]); };
+    // Kết nối nhận log real-time từ máy Mac
+    const eventSource = new EventSource('/api/logs');
+    eventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        appendLog(data.time, data.message, data.type);
+    };
 
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 B';
-            const i = Math.floor(Math.log(bytes) / Math.log(1024));
-            return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + ['B', 'KB', 'MB', 'GB'][i];
+    function appendLog(time, message, type) {
+        const div = document.createElement('div');
+        div.className = `log-line log-${type}`;
+        div.innerText = `[${time}] ${message}`;
+        logsContainer.appendChild(div);
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+    }
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFile(e.target.files[0]); });
+
+    function handleFile(file) {
+        if (!file.name.endsWith('.ipa')) {
+            alert('Vui lòng chỉ chọn tệp tin định dạng .ipa');
+            return;
         }
+        uploadSecure(file);
+    }
 
-        function handleUpload(file) {
-            resultDiv.style.display = 'none';
-            progressContainer.style.display = 'block';
-            speedEtaText.style.display = 'block';
-            progressBar.style.width = '0%';
-            progressBar.innerText = '0%';
-            dropZone.innerText = "⏳ Đang chuẩn bị phân mảnh file...";
+    function updateProgress(percent, message, isComplete = false) {
+        const safePercent = Math.min(Math.max(percent, 0), 100);
+        progressFill.style.width = `${safePercent}%`;
+        progressFill.style.background = isComplete ? 'var(--success)' : 'var(--primary)';
+        progressPercent.innerText = `${Math.round(safePercent)}%`;
+        statusLabel.innerText = message;
+    }
 
-            const CHUNK_SIZE = 5 * 1024 * 1024; // Cắt mảnh 5MB
-            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-            const uploadId = 'upload_' + Date.now();
-            let currentChunk = 0;
-            let uploadStartTime = performance.now();
+    function startProcessingUI() {
+        clearInterval(progressTimer);
+        progressArea.style.display = 'block';
+        resultZone.style.display = 'none';
+        updateProgress(5, 'Đang chuẩn bị tải tệp tin lên máy chủ...');
 
-            function uploadNextChunk() {
-                const start = currentChunk * CHUNK_SIZE;
-                const end = Math.min(start + CHUNK_SIZE, file.size);
-                const chunk = file.slice(start, end);
-                const currentChunkSize = end - start;
+        const startedAt = new Date();
+        progressStartTime.innerText = startedAt.toLocaleTimeString('vi-VN');
+        progressEndTime.innerText = 'Đang xử lý...';
+        progressDuration.innerText = 'Đang xử lý...';
 
-                const formData = new FormData();
-                formData.append('ipaChunk', chunk);
-                formData.append('chunkIndex', currentChunk);
-                formData.append('totalChunks', totalChunks);
-                formData.append('uploadId', uploadId);
-                formData.append('originalName', file.name);
-                formData.append('totalSize', file.size);
-                formData.append('chunkSize', currentChunkSize);
+        let simulatedProgress = 8;
+        progressTimer = setInterval(() => {
+            simulatedProgress = Math.min(simulatedProgress + Math.random() * 8 + 2, 92);
+            updateProgress(simulatedProgress, simulatedProgress < 80 ? 'Máy chủ đang xử lý dữ liệu...' : 'Đang kết nối và chuẩn bị kết quả...');
+        }, 450);
 
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', '/upload-ipa-chunk', true);
+        return startedAt;
+    }
 
-                xhr.upload.addEventListener('progress', (e) => {
-                    if (e.lengthComputable) {
-                        const totalUploadedBytes = start + e.loaded;
-                        const percentComplete = Math.round((totalUploadedBytes / file.size) * 100);
-                        progressBar.style.width = percentComplete + '%';
-                        progressBar.innerText = `${percentComplete}% (${formatBytes(totalUploadedBytes)} / ${formatBytes(file.size)})`;
+    async function uploadSecure(file) {
+        const startedAt = startProcessingUI();
 
-                        // Tính toán tốc độ & thời gian ước tính (ETA)
-                        const durationSec = (performance.now() - uploadStartTime) / 1000;
-                        if (durationSec > 0.1) {
-                            const speedBytesPerSec = totalUploadedBytes / durationSec;
-                            const remainingBytes = file.size - totalUploadedBytes;
-                            const etaSec = Math.round(remainingBytes / speedBytesPerSec);
-                            speedEtaText.innerText = `Băng thông upload: ${formatBytes(speedBytesPerSec)}/s | Thời gian còn lại: ~${etaSec} giây`;
-                        }
-                    }
-                });
+        try {
+            const formData = new FormData();
+            formData.append('ipaFile', file);
 
-                xhr.onload = function () {
-                    if (xhr.status === 200) {
-                        const response = JSON.parse(xhr.responseText);
-                        currentChunk++;
-
-                        if (currentChunk < totalChunks) {
-                            uploadNextChunk();
-                        } else {
-                            dropZone.innerText = "⚡ Đang hợp nhất mảnh dữ liệu...";
-                            speedEtaText.style.display = 'none';
-                            if (response.success) {
-                                progressContainer.style.display = 'none';
-                                dropZone.innerText = "Kéo & Thả file .ipa vào đây hoặc click để chọn file";
-                                resultDiv.style.display = 'block';
-                                
-                                document.getElementById('info-time').innerText = response.processTime;
-                                document.getElementById('info-icon').src = response.appInfo.icon;
-                                document.getElementById('info-name').innerText = response.appInfo.appName;
-                                document.getElementById('info-bundle').innerText = response.appInfo.bundleId;
-                                document.getElementById('info-version').innerText = response.appInfo.version;
-                                document.getElementById('info-build').innerText = response.appInfo.buildNumber;
-                                document.getElementById('share-url-input').value = response.shareUrl;
-
-                                document.getElementById('qr-container').innerHTML = "";
-                                new QRCode(document.getElementById("qr-container"), {
-                                    text: response.downloadUrl, width: 180, height: 180,
-                                    colorDark : "#000000", colorLight : "#ffffff", correctLevel : QRCode.CorrectLevel.H
-                                });
-                                document.getElementById('install-link').href = response.downloadUrl;
-                            } else {
-                                alert('Lỗi: ' + response.message);
-                                resetDropZone();
-                            }
-                        }
-                    } else {
-                        alert('Lỗi kết nối máy chủ!');
-                        resetDropZone();
-                    }
-                };
-                xhr.onerror = () => { alert('Lỗi kết nối mạng.'); resetDropZone(); };
-                xhr.send(formData);
-            }
-            uploadNextChunk();
-        }
-
-        function resetDropZone() {
-            progressContainer.style.display = 'none';
-            speedEtaText.style.display = 'none';
-            dropZone.innerText = "Kéo & Thả file .ipa vào đây hoặc click để chọn file";
-        }
-
-        function copyShareUrl() {
-            const copyText = document.getElementById("share-url-input");
-            if (!copyText.value) return;
-            navigator.clipboard.writeText(copyText.value).then(() => {
-                const btnCopy = document.getElementById('btn-copy');
-                btnCopy.innerText = "Copied!"; btnCopy.style.background = "#28a745";
-                setTimeout(() => { btnCopy.innerText = "Copy Link"; btnCopy.style.background = "#6c757d"; }, 2000);
+            const response = await fetch('/api/upload-secure', {
+                method: 'POST',
+                body: formData
             });
-        }
 
-        const logContainer = document.getElementById('log-container');
-        const eventSource = new EventSource('/api/logs');
-        eventSource.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            const logItem = document.createElement('div');
-            logItem.className = 'log-item';
-            logItem.innerHTML = `<span class="log-time">[${data.time}]</span><span class="log-${data.type}">${data.message}</span>`;
-            logContainer.appendChild(logItem);
-            logContainer.scrollTop = logContainer.scrollHeight;
-        };
-    </script>
+            clearInterval(progressTimer);
+            updateProgress(95, 'Máy chủ đang hoàn tất xử lý và tạo liên kết chia sẻ...', false);
+
+            const contentType = response.headers.get("content-type");
+            if (!contentType || !contentType.includes("application/json")) {
+                throw new Error("Máy chủ trả về phản hồi lỗi dạng HTML/Văn bản thay vì JSON. Vui lòng kiểm tra Log Terminal bên dưới.");
+            }
+
+            const finalResult = await response.json();
+            
+            if (!finalResult.success) {
+                throw new Error(finalResult.message || 'Lỗi xử lý không xác định từ Server.');
+            }
+
+            const finishedAt = new Date();
+            const totalDuration = ((finishedAt - startedAt) / 1000).toFixed(2);
+
+            updateProgress(100, 'Hoàn tất xử lý thành công!', true);
+            progressEndTime.innerText = finishedAt.toLocaleTimeString('vi-VN');
+            progressDuration.innerText = `${totalDuration} giây`;
+
+            document.getElementById('res-icon').src = finalResult.appInfo.icon;
+            document.getElementById('res-name').innerText = finalResult.appInfo.appName;
+            document.getElementById('res-bundle').innerText = finalResult.appInfo.bundleId;
+            document.getElementById('res-version').innerText = `Phiên bản: ${finalResult.appInfo.version} (Build ${finalResult.appInfo.buildNumber})`;
+            document.getElementById('res-link').href = finalResult.downloadUrl;
+            document.getElementById('res-time').innerText = `⏱️ Bắt đầu: ${startedAt.toLocaleTimeString('vi-VN')} • Kết thúc: ${finishedAt.toLocaleTimeString('vi-VN')} • Tổng: ${totalDuration} giây`;
+            shareUrlInput.value = finalResult.shareUrl;
+
+            const qrBox = document.getElementById('qrcode-box');
+            qrBox.innerHTML = '';
+            const qr = qrcode(0, 'M');
+            qr.addData(finalResult.shareUrl);
+            qr.make();
+            const qrImg = document.createElement('img');
+            qrImg.src = qr.createDataURL(8, 0);
+            qrImg.alt = 'Mã QR chia sẻ IPA';
+            qrImg.width = 220;
+            qrImg.height = 220;
+            qrBox.appendChild(qrImg);
+            qrDownloadDataUrl = qrImg.src;
+
+            resultZone.style.display = 'block';
+
+        } catch (err) {
+            clearInterval(progressTimer);
+            updateProgress(0, `❌ Thất bại: ${err.message}`, false);
+            progressFill.style.background = 'var(--danger)';
+            progressDuration.innerText = 'Thất bại';
+        }
+    }
+
+    copyLinkButton.addEventListener('click', async () => {
+        const url = shareUrlInput.value;
+        if (!url) return;
+
+        try {
+            await navigator.clipboard.writeText(url);
+            copyLinkButton.innerText = 'Đã sao chép';
+            setTimeout(() => {
+                copyLinkButton.innerText = 'Sao chép';
+            }, 1500);
+        } catch (error) {
+            shareUrlInput.select();
+            document.execCommand('copy');
+            copyLinkButton.innerText = 'Đã sao chép';
+            setTimeout(() => {
+                copyLinkButton.innerText = 'Sao chép';
+            }, 1500);
+        }
+    });
+
+    downloadQrButton.addEventListener('click', () => {
+        if (!qrDownloadDataUrl) return;
+        const link = document.createElement('a');
+        link.href = qrDownloadDataUrl;
+        link.download = 'qrcode-share-ipa.png';
+        link.click();
+    });
+</script>
 </body>
 </html>
