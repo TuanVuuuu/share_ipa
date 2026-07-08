@@ -17,7 +17,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '2';
+const ASSET_VERSION = process.env.ASSET_VERSION || '5';
 
 console.log('========== ENV ==========');
 console.log('__dirname:', __dirname);
@@ -167,7 +167,24 @@ function logToUI(message, type = 'info') {
     const logEntry = { time, message, type };
     systemLogs.push(logEntry);
     if (systemLogs.length > 100) systemLogs.shift();
-    logClients.forEach(client => client.res.write(`data: ${JSON.stringify(logEntry)}\n\n`));
+    logClients.forEach(client => {
+        client.res.write(`data: ${JSON.stringify(logEntry)}\n\n`);
+        // Ép Node đẩy dữ liệu ngay nếu response có hàm flush (khi bật nén/proxy)
+        if (typeof client.res.flush === 'function') client.res.flush();
+    });
+}
+
+// Nhường event loop 1 nhịp để cú res.write ở trên thực sự được đẩy tới client.
+// Nếu không, các log ghi trước một tác vụ đồng bộ nặng (parse IPA, copy file lớn)
+// sẽ bị Node gộp lại và chỉ tới nơi khi xử lý xong -> mất tính real-time.
+function flushTick() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+
+// Ghi log rồi nhường event loop, đảm bảo dòng log tới trình duyệt ngay lập tức.
+async function logRealtime(message, type = 'info') {
+    logToUI(message, type);
+    await flushTick();
 }
 
 function formatBytes(bytes, decimals = 2) {
@@ -321,8 +338,8 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
     const formattedTotalSize = formatBytes(req.file.size);
 
     try {
-        logToUI(`📥 Đã nhận và lưu kho tệp tin (${formattedTotalSize}) thành công vào ổ đĩa Mac!`, 'success');
-        logToUI(`⚡ Bắt đầu bóc tách Metadata IPA bằng AppInfoParser...`, 'info');
+        await logRealtime(`📥 Đã nhận và lưu kho tệp tin (${formattedTotalSize}) thành công vào ổ đĩa Mac!`, 'success');
+        await logRealtime(`⚡ Bắt đầu bóc tách Metadata IPA bằng AppInfoParser...`, 'info');
 
         const parser = new AppInfoParser(finalPath);
 
@@ -338,7 +355,7 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
             const iconBase64 = result.icon || 'https://cdn-icons-png.flaticon.com/512/5115/5115293.png';
             const totalProcessTime = ((performance.now() - startTime) / 1000).toFixed(2);
 
-            logToUI(`✅ Phân tích cấu trúc thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} trong ${totalProcessTime} giây`, 'success');
+            await logRealtime(`✅ Phân tích cấu trúc thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} trong ${totalProcessTime} giây`, 'success');
 
             // 📁 Phân loại lưu trữ lâu dài
             const safeAppName = appInfo.appName.replace(/[/\\?%*:|"<>\s]/g, '_');
@@ -347,8 +364,9 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
 
             if (!fs.existsSync(targetAppFolder)) fs.mkdirSync(targetAppFolder, { recursive: true });
 
-            // Sao chép sang bộ lưu trữ lưu trữ song song
-            fs.copyFileSync(finalPath, path.join(targetAppFolder, finalFilename));
+            // Sao chép sang bộ lưu trữ song song (bất đồng bộ để không chặn luồng log real-time)
+            await logRealtime(`🗄️ Đang sao lưu bản build vào kho lưu trữ...`, 'info');
+            await fs.promises.copyFile(finalPath, path.join(targetAppFolder, finalFilename));
 
             // Lưu file cấu hình lịch sử dạng JSON
             const metadataInfo = {
@@ -358,7 +376,7 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
                 uploadedAt: new Date().toISOString(),
                 processTimeSeconds: totalProcessTime
             };
-            fs.writeFileSync(path.join(targetAppFolder, `${finalFilename}.json`), JSON.stringify(metadataInfo, null, 4));
+            await fs.promises.writeFile(path.join(targetAppFolder, `${finalFilename}.json`), JSON.stringify(metadataInfo, null, 4));
 
             // 🧹 Kiểm soát dọn dẹp (Giới hạn tối đa 10 bản build gần nhất)
             const currentFiles = fs.readdirSync(targetAppFolder);
@@ -372,7 +390,7 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
 
             if (ipaFiles.length > 10) {
                 const deleteCount = ipaFiles.length - 10;
-                logToUI(`⚠️ Vượt quá 10 bản build. Tiến hành tự động xóa bỏ ${deleteCount} tệp cũ...`, 'info');
+                await logRealtime(`⚠️ Vượt quá 10 bản build. Tiến hành tự động xóa bỏ ${deleteCount} tệp cũ...`, 'info');
                 for (let k = 0; k < deleteCount; k++) {
                     if (fs.existsSync(ipaFiles[k].path)) fs.unlinkSync(ipaFiles[k].path);
                     if (fs.existsSync(ipaFiles[k].path + '.json')) fs.unlinkSync(ipaFiles[k].path + '.json');
@@ -385,13 +403,13 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
 <plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${PUBLIC_BASE_URL}/uploads/${finalFilename}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
 
             const plistFilename = `${finalFilename}.plist`;
-            fs.writeFileSync(path.join(UPLOADS_MAIN_DIR, plistFilename), plistContent);
+            await fs.promises.writeFile(path.join(UPLOADS_MAIN_DIR, plistFilename), plistContent);
 
             const manifestUrl = `${PUBLIC_BASE_URL}/uploads/${plistFilename}`;
             const downloadUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
             const shareUrl = `${PUBLIC_BASE_URL}/install?plist=${plistFilename}`;
 
-            logToUI(`🎉 Toàn bộ quy trình hoàn tất! Sẵn sàng chia sẻ dữ liệu công khai.`, 'success');
+            await logRealtime(`🎉 Toàn bộ quy trình hoàn tất! Sẵn sàng chia sẻ dữ liệu công khai.`, 'success');
 
             // 🔳 Tạo ảnh QR (data URL) từ link cài đặt để lưu vĩnh viễn trong danh mục
             let qrDataUrl = '';
@@ -418,10 +436,11 @@ app.post('/api/upload-secure', upload.single('ipaFile'), async (req, res) => {
             };
 
             try {
+                await logRealtime('☁️ Đang đồng bộ thông tin app lên danh mục GitHub...', 'info');
                 await appendToCatalog(catalogRecord);
-                logToUI('🗂️ Đã lưu thông tin app vào danh mục trên GitHub.', 'success');
+                await logRealtime('🗂️ Đã lưu thông tin app vào danh mục trên GitHub.', 'success');
             } catch (catalogErr) {
-                logToUI(`⚠️ Lưu danh mục lên GitHub thất bại: ${catalogErr.message}`, 'error');
+                await logRealtime(`⚠️ Lưu danh mục lên GitHub thất bại: ${catalogErr.message}`, 'error');
             }
 
             // Trả phản hồi cho Frontend

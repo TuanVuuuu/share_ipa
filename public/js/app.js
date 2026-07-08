@@ -15,6 +15,8 @@ const statusLabel = document.getElementById('status-label');
 const progressStartTime = document.getElementById('progress-start-time');
 const progressEndTime = document.getElementById('progress-end-time');
 const progressDuration = document.getElementById('progress-duration');
+const progressSpeed = document.getElementById('progress-speed');
+const progressEta = document.getElementById('progress-eta');
 const progressActivity = document.getElementById('progress-activity');
 const progressActivityText = document.getElementById('progress-activity-text');
 const resultZone = document.getElementById('result-zone');
@@ -409,6 +411,24 @@ function formatBytesClient(bytes) {
     return `${(bytes / 1024).toFixed(0)} KB`;
 }
 
+// Định dạng tốc độ mạng: byte/giây -> MB/s hoặc KB/s
+function formatSpeed(bytesPerSecond) {
+    if (!bytesPerSecond || bytesPerSecond <= 0) return '--';
+    const mbps = bytesPerSecond / (1024 * 1024);
+    if (mbps >= 1) return `${mbps.toFixed(2)} MB/s`;
+    return `${(bytesPerSecond / 1024).toFixed(0)} KB/s`;
+}
+
+// Định dạng thời gian còn lại: giây -> "1 phút 05 giây" / "42 giây"
+function formatEta(seconds) {
+    if (!isFinite(seconds) || seconds <= 0) return '--';
+    const s = Math.round(seconds);
+    if (s < 60) return `${s} giây`;
+    const m = Math.floor(s / 60);
+    const rest = s % 60;
+    return `${m} phút ${rest.toString().padStart(2, '0')} giây`;
+}
+
 let uploadStartedAt = null;
 
 function startProcessingUI() {
@@ -423,6 +443,8 @@ function startProcessingUI() {
     progressStartTime.innerText = uploadStartedAt.toLocaleTimeString('vi-VN');
     progressEndTime.innerText = 'Đang xử lý...';
     progressDuration.innerText = 'Đang xử lý...';
+    progressSpeed.innerText = 'Đang đo...';
+    progressEta.innerText = 'Đang tính...';
     return uploadStartedAt;
 }
 
@@ -432,6 +454,7 @@ function failUpload(message) {
     updateProgress(0, `❌ Thất bại: ${message}`, 'error');
     setActivity(message, 'error');
     progressDuration.innerText = 'Thất bại';
+    progressEta.innerText = '--';
 }
 
 function renderSuccess(finalResult, startedAt) {
@@ -443,6 +466,7 @@ function renderSuccess(finalResult, startedAt) {
     setActivity('Hoàn tất! Ứng dụng đã sẵn sàng chia sẻ.', 'done');
     progressEndTime.innerText = finishedAt.toLocaleTimeString('vi-VN');
     progressDuration.innerText = `${totalDuration} giây`;
+    progressEta.innerText = 'Hoàn tất';
 
     document.getElementById('res-icon').src = finalResult.appInfo.icon;
     document.getElementById('res-name').innerText = finalResult.appInfo.appName;
@@ -503,6 +527,22 @@ function finishUpload(xhr, startedAt) {
     renderSuccess(result, startedAt);
 }
 
+let stallTimer = null;
+
+function clearStallWatch() {
+    clearTimeout(stallTimer);
+    stallTimer = null;
+}
+
+// Nếu quá lâu không có thêm byte nào được gửi đi thì cảnh báo nghi treo
+function armStallWatch() {
+    clearStallWatch();
+    stallTimer = setTimeout(() => {
+        progressSpeed.innerText = '0 KB/s (nghẽn)';
+        setActivity('⚠️ Đường truyền đang bị nghẽn (không có dữ liệu mới ~15 giây). Máy chủ có thể đang bận hoặc mạng chập chờn — vui lòng chờ hoặc thử lại.', 'active');
+    }, 15000);
+}
+
 function uploadSecure(file) {
     const startedAt = startProcessingUI();
 
@@ -511,13 +551,38 @@ function uploadSecure(file) {
     xhr.responseType = 'text';
     xhr.timeout = 15 * 60 * 1000; // 15 phút cho file lớn / mạng chậm
 
+    // Mốc đo tốc độ tức thời (làm mượt bằng trung bình trượt)
+    let lastLoaded = 0;
+    let lastTs = performance.now();
+    let smoothedBps = 0;
+
+    armStallWatch();
+
     // Tiến trình TẢI LÊN thực tế (ánh xạ 0-90% theo số byte đã gửi)
     xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
+            armStallWatch(); // có byte mới -> reset đồng hồ treo
+
+            const now = performance.now();
+            const deltaBytes = e.loaded - lastLoaded;
+            const deltaSec = (now - lastTs) / 1000;
+
+            if (deltaSec > 0 && deltaBytes >= 0) {
+                const instantBps = deltaBytes / deltaSec;
+                // Trung bình trượt để số không nhảy loạn
+                smoothedBps = smoothedBps === 0 ? instantBps : smoothedBps * 0.7 + instantBps * 0.3;
+                lastLoaded = e.loaded;
+                lastTs = now;
+
+                progressSpeed.innerText = formatSpeed(smoothedBps);
+                const remainingBytes = e.total - e.loaded;
+                progressEta.innerText = smoothedBps > 0 ? formatEta(remainingBytes / smoothedBps) : '--';
+            }
+
             const uploadedPercent = (e.loaded / e.total) * 100;
             const mapped = Math.min(uploadedPercent * 0.9, 90);
             updateProgress(mapped, `Đang tải lên: ${Math.round(uploadedPercent)}% (${formatBytesClient(e.loaded)} / ${formatBytesClient(e.total)})`);
-            setActivity(`Đang truyền dữ liệu lên máy chủ (${formatBytesClient(e.loaded)} / ${formatBytesClient(e.total)})`, 'active');
+            setActivity(`Đang truyền dữ liệu lên máy chủ (${formatBytesClient(e.loaded)} / ${formatBytesClient(e.total)}) • ${formatSpeed(smoothedBps)}`, 'active');
         } else {
             updateProgress(45, 'Đang tải tệp tin lên máy chủ...');
             setActivity('Đang truyền dữ liệu lên máy chủ', 'active');
@@ -526,6 +591,8 @@ function uploadSecure(file) {
 
     // Tải xong toàn bộ file → chờ máy chủ phân tích IPA
     xhr.upload.onload = () => {
+        clearStallWatch();
+        progressEta.innerText = 'Đã tải xong';
         updateProgress(92, 'Đã tải lên xong. Máy chủ đang phân tích IPA...');
         setActivity('Máy chủ đang tiếp nhận và phân tích tệp IPA', 'active');
         let p = 92;
@@ -536,10 +603,10 @@ function uploadSecure(file) {
         }, 400);
     };
 
-    xhr.onload = () => finishUpload(xhr, startedAt);
-    xhr.onerror = () => failUpload('Không thể kết nối tới máy chủ. Kiểm tra kết nối mạng rồi thử lại.');
-    xhr.ontimeout = () => failUpload('Quá thời gian chờ khi tải lên. Tệp có thể quá lớn hoặc mạng quá chậm.');
-    xhr.onabort = () => failUpload('Quá trình tải lên đã bị huỷ.');
+    xhr.onload = () => { clearStallWatch(); finishUpload(xhr, startedAt); };
+    xhr.onerror = () => { clearStallWatch(); failUpload('Không thể kết nối tới máy chủ. Kiểm tra kết nối mạng rồi thử lại.'); };
+    xhr.ontimeout = () => { clearStallWatch(); failUpload('Quá thời gian chờ khi tải lên. Tệp có thể quá lớn hoặc mạng quá chậm.'); };
+    xhr.onabort = () => { clearStallWatch(); failUpload('Quá trình tải lên đã bị huỷ.'); };
 
     const formData = new FormData();
     formData.append('ipaFile', file);
