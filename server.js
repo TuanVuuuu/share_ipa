@@ -122,6 +122,9 @@ app.get('/login', (req, res) => res.redirect('/'));
 // Trang cài đặt độc lập cho người quét QR (mở màn hình riêng, chỉ hiện 1 bản build)
 app.get('/install', (req, res) => sendHtmlWithVersion(res, 'install.html'));
 
+// Trang chi tiết ứng dụng: danh sách tất cả bản build của một app
+app.get('/app', (req, res) => sendHtmlWithVersion(res, 'app-detail.html'));
+
 // Kiểm tra trạng thái đăng nhập cho frontend
 app.get('/api/auth-status', (req, res) => {
     res.json({ authenticated: isAuthenticated(req) });

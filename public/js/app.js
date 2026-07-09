@@ -48,23 +48,7 @@ const catalogContainer = document.getElementById('catalog-container');
 const catalogList = document.getElementById('catalog-list');
 const catalogEmpty = document.getElementById('catalog-empty');
 const catalogSub = document.getElementById('catalog-sub');
-const catalogTitle = document.getElementById('catalog-title');
 const catalogRefreshBtn = document.getElementById('catalog-refresh-btn');
-const catalogDetail = document.getElementById('catalog-detail');
-const catalogBack = document.getElementById('catalog-back');
-const detailIcon = document.getElementById('detail-icon');
-const detailName = document.getElementById('detail-name');
-const detailBundle = document.getElementById('detail-bundle');
-const detailBuilds = document.getElementById('detail-builds');
-
-const qrModal = document.getElementById('qr-modal');
-const qrModalClose = document.getElementById('qr-modal-close');
-const qrModalTitle = document.getElementById('qr-modal-title');
-const qrModalVersion = document.getElementById('qr-modal-version');
-const qrModalImage = document.getElementById('qr-modal-image');
-const qrModalUrl = document.getElementById('qr-modal-url');
-const qrModalCopy = document.getElementById('qr-modal-copy');
-const qrModalInstall = document.getElementById('qr-modal-install');
 
 const protectedAreas = [dropZone, progressArea, resultZone, logsContainer, catalogContainer];
 
@@ -135,7 +119,6 @@ let catalogItems = [];
 
 async function loadCatalog() {
     if (!isAuthenticated) return;
-    showCatalogList(); // luôn quay về màn danh sách thư mục khi tải lại
     catalogSub.innerText = 'Đang tải danh mục...';
     try {
         const res = await fetch('/api/catalog');
@@ -169,13 +152,6 @@ function groupByBundle(items) {
         g.count = g.builds.length;
     });
     return groups.sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
-}
-
-// Chuyển về màn hình danh sách thư mục
-function showCatalogList() {
-    catalogDetail.style.display = 'none';
-    catalogList.style.display = 'grid';
-    catalogTitle.innerText = 'Danh mục ứng dụng';
 }
 
 function renderCatalog(configured) {
@@ -215,98 +191,13 @@ function renderCatalog(configured) {
                 <button type="button" class="btn view-all-btn">Xem tất cả</button>
             </div>
         `;
-        const open = () => openAppDetail(group);
+        const open = () => {
+            window.location.href = `/app?bundle=${encodeURIComponent(latest.bundleId || group.key)}`;
+        };
         card.addEventListener('click', open);
         catalogList.appendChild(card);
     });
 }
-
-// Mở màn chi tiết: danh sách tất cả bản build của 1 app
-function openAppDetail(group) {
-    const { latest, builds } = group;
-
-    detailIcon.src = latest.icon || FALLBACK_ICON;
-    detailIcon.onerror = () => { detailIcon.src = FALLBACK_ICON; };
-    detailName.innerText = latest.appName || 'Ứng dụng iOS';
-    detailBundle.innerText = latest.bundleId || '';
-    catalogTitle.innerText = 'Chi tiết ứng dụng';
-    catalogSub.innerText = `${builds.length} bản build của "${latest.appName}".`;
-
-    detailBuilds.innerHTML = '';
-    builds.forEach((build, index) => {
-        const row = document.createElement('div');
-        row.className = 'build-row';
-        row.innerHTML = `
-            <div class="build-info">
-                <span class="badge">v${escapeHtml(build.version)} (Build ${escapeHtml(build.buildNumber)})</span>
-                ${index === 0 ? '<span class="build-latest">Mới nhất</span>' : ''}
-                <div class="build-sub">📦 ${escapeHtml(build.fileSize || '--')} • 🕒 ${escapeHtml(formatDateTime(build.uploadedAt))}</div>
-            </div>
-            <div class="build-actions">
-                <button type="button" class="btn secondary qr-btn">Xem QR</button>
-                <a class="btn install-mini" href="${escapeHtml(build.downloadUrl)}">Cài đặt</a>
-            </div>
-        `;
-        row.querySelector('.qr-btn').addEventListener('click', () => openQrModal(build));
-        detailBuilds.appendChild(row);
-    });
-
-    catalogList.style.display = 'none';
-    catalogEmpty.style.display = 'none';
-    catalogDetail.style.display = 'block';
-    catalogContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-catalogBack.addEventListener('click', () => {
-    showCatalogList();
-    const groups = groupByBundle(catalogItems);
-    catalogSub.innerText = groups.length
-        ? `Có ${groups.length} ứng dụng trong danh mục.`
-        : 'Danh sách các ứng dụng đã xử lý và lưu trữ.';
-});
-
-function openQrModal(item) {
-    qrModalTitle.innerText = item.appName || 'Ứng dụng';
-    qrModalVersion.innerText = `${item.bundleId || ''} • v${item.version} (Build ${item.buildNumber})`;
-    qrModalUrl.value = item.shareUrl || '';
-    qrModalInstall.href = item.downloadUrl || '#';
-
-    qrModalImage.innerHTML = '';
-    const img = document.createElement('img');
-    if (item.qr) {
-        img.src = item.qr;
-    } else if (item.shareUrl) {
-        const qr = qrcode(0, 'M');
-        qr.addData(item.shareUrl);
-        qr.make();
-        img.src = qr.createDataURL(8, 0);
-    }
-    img.alt = 'QR cài đặt';
-    qrModalImage.appendChild(img);
-
-    qrModal.style.display = 'flex';
-}
-
-function closeQrModal() {
-    qrModal.style.display = 'none';
-}
-
-qrModalClose.addEventListener('click', closeQrModal);
-qrModal.addEventListener('click', (e) => { if (e.target === qrModal) closeQrModal(); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeQrModal(); });
-
-qrModalCopy.addEventListener('click', async () => {
-    const url = qrModalUrl.value;
-    if (!url) return;
-    try {
-        await navigator.clipboard.writeText(url);
-    } catch (err) {
-        qrModalUrl.select();
-        document.execCommand('copy');
-    }
-    qrModalCopy.innerText = 'Đã sao chép';
-    setTimeout(() => { qrModalCopy.innerText = 'Sao chép'; }, 1500);
-});
 
 catalogRefreshBtn.addEventListener('click', loadCatalog);
 

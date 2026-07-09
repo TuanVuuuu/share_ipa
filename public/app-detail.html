@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chi tiết ứng dụng — Share IPA</title>
+    <link rel="icon" type="image/png" href="/ic_launcher_web.png">
+    <link rel="apple-touch-icon" href="/ic_launcher_web.png">
+    <link rel="stylesheet" href="/css/styles.css?v=__V__">
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+</head>
+<body>
+
+<div class="container app-detail-page" id="app-detail-zone">
+    <a href="/" class="catalog-back" id="detail-back">← Quay lại danh mục</a>
+
+    <div class="catalog-head">
+        <h2 id="detail-page-title">Chi tiết ứng dụng</h2>
+        <button type="button" class="btn secondary" id="detail-share-btn" style="display:none;">Chia sẻ</button>
+    </div>
+    <p class="catalog-sub" id="detail-page-sub">Đang tải...</p>
+
+    <div class="detail-header" id="detail-header" style="display:none;">
+        <img src="" alt="icon" class="detail-icon" id="detail-icon">
+        <div class="detail-header-info">
+            <h3 id="detail-name"></h3>
+            <p id="detail-bundle"></p>
+        </div>
+    </div>
+
+    <div id="detail-builds" class="detail-builds"></div>
+    <div id="detail-empty" class="catalog-empty" style="display:none;">Không tìm thấy ứng dụng trong danh mục.</div>
+    <div id="detail-auth" class="catalog-empty" style="display:none;">
+        Vui lòng <a href="/">đăng nhập tại trang chủ</a> để xem chi tiết ứng dụng.
+    </div>
+</div>
+
+<div class="modal-overlay" id="qr-modal" style="display:none;">
+    <div class="modal-card">
+        <button type="button" class="modal-close" id="qr-modal-close" aria-label="Đóng">&times;</button>
+        <h3 id="qr-modal-title">Tên ứng dụng</h3>
+        <p class="qr-hint" id="qr-modal-version"></p>
+        <div class="qr-code" id="qr-modal-image"></div>
+        <p class="qr-hint">Quét mã QR bằng Camera của iPhone để cài đặt ứng dụng</p>
+        <div class="url-box">
+            <input type="text" id="qr-modal-url" readonly value="">
+            <button type="button" class="btn secondary" id="qr-modal-copy">Sao chép</button>
+        </div>
+        <a href="#" id="qr-modal-install" class="btn">Mở liên kết cài đặt</a>
+    </div>
+</div>
+
+<script src="/js/app-detail.js?v=__V__"></script>
+</body>
+</html>

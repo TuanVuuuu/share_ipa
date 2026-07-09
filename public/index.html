@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Share IPA</title>
+    <link rel="icon" type="image/png" href="/ic_launcher_web.png">
+    <link rel="apple-touch-icon" href="/ic_launcher_web.png">
     <link rel="stylesheet" href="/css/styles.css?v=__V__">
     <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 </head>
@@ -111,38 +113,11 @@
 
     <div id="catalog-list" class="catalog-grid"></div>
     <div id="catalog-empty" class="catalog-empty" style="display:none;">Chưa có ứng dụng nào trong danh mục.</div>
-
-    <div id="catalog-detail" style="display:none;">
-        <button type="button" class="catalog-back" id="catalog-back">← Quay lại danh mục</button>
-        <div class="detail-header">
-            <img src="" alt="icon" class="detail-icon" id="detail-icon">
-            <div class="detail-header-info">
-                <h3 id="detail-name"></h3>
-                <p id="detail-bundle"></p>
-            </div>
-        </div>
-        <div id="detail-builds" class="detail-builds"></div>
-    </div>
 </div>
 
 <div class="log-container" id="terminal-logs">
     <div class="log-header">
         🖥️ REAL-TIME SYSTEM TERMINAL LOGS
-    </div>
-</div>
-
-<div class="modal-overlay" id="qr-modal" style="display:none;">
-    <div class="modal-card">
-        <button type="button" class="modal-close" id="qr-modal-close" aria-label="Đóng">&times;</button>
-        <h3 id="qr-modal-title">Tên ứng dụng</h3>
-        <p class="qr-hint" id="qr-modal-version"></p>
-        <div class="qr-code" id="qr-modal-image"></div>
-        <p class="qr-hint">Quét mã QR bằng Camera của iPhone để cài đặt ứng dụng</p>
-        <div class="url-box">
-            <input type="text" id="qr-modal-url" readonly value="">
-            <button type="button" class="btn secondary" id="qr-modal-copy">Sao chép</button>
-        </div>
-        <a href="#" id="qr-modal-install" class="btn">Mở liên kết cài đặt</a>
     </div>
 </div>
 

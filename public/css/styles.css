@@ -598,6 +598,15 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 }
 
 /* Màn chi tiết: danh sách bản build */
+/* Màn chi tiết ứng dụng (trang /app) */
+.app-detail-page {
+    min-height: calc(100vh - 48px);
+}
+.app-detail-page .catalog-back {
+    display: inline-block;
+    text-decoration: none;
+    margin-bottom: 16px;
+}
 .catalog-back {
     border: 0;
     background: transparent;
