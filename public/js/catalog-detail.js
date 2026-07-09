@@ -17,6 +17,22 @@
         return d.toLocaleString('vi-VN');
     }
 
+    // Ẩn phần giữa UDID: giữ 6 ký tự đầu + •••••••••• + 4 ký tự cuối
+    // Hỗ trợ cả dạng cũ (40 hex) lẫn dạng mới (00008120-000A1234567890AB)
+    function maskUdid(udid) {
+        if (!udid || udid.length <= 12) return udid;
+        const hasNewFormat = /^[0-9a-f]+-/i.test(udid);
+        if (hasNewFormat) {
+            // Dạng mới: giữ nguyên prefix trước gạch ngang, ẩn phần sau
+            const dashIdx = udid.indexOf('-');
+            const prefix = udid.slice(0, dashIdx + 1); // "00008120-"
+            const rest = udid.slice(dashIdx + 1);      // "000A1234567890AB"
+            return prefix + rest.slice(0, 4) + '••••••••' + rest.slice(-4);
+        }
+        // Dạng cũ 40 ký tự hex
+        return udid.slice(0, 6) + '••••••••••••••••••••••••••••' + udid.slice(-6);
+    }
+
     async function copyText(text, button) {
         if (!text) return;
         try {
@@ -77,7 +93,7 @@
             const devices = Array.isArray(item.provisionedDevices) ? item.provisionedDevices : [];
             if (!devices.length) return '';
             const rows = devices.map((udid, i) =>
-                `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid">${escapeHtml(udid)}</code></div>`
+                `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid" title="${escapeHtml(udid)}">${escapeHtml(maskUdid(udid))}</code></div>`
             ).join('');
             return `
                 <details class="devices-details${extraClass ? ' ' + extraClass : ''}">
@@ -226,6 +242,7 @@
         FALLBACK_ICON,
         escapeHtml,
         formatDateTime,
+        maskUdid,
         createDetailView
     };
 })(window);

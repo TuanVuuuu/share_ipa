@@ -15,6 +15,18 @@ function formatDateTime(iso) {
     return d.toLocaleString('vi-VN');
 }
 
+function maskUdid(udid) {
+    if (!udid || udid.length <= 12) return udid;
+    const hasNewFormat = /^[0-9a-f]+-/i.test(udid);
+    if (hasNewFormat) {
+        const dashIdx = udid.indexOf('-');
+        const prefix = udid.slice(0, dashIdx + 1);
+        const rest = udid.slice(dashIdx + 1);
+        return prefix + rest.slice(0, 4) + '••••••••' + rest.slice(-4);
+    }
+    return udid.slice(0, 6) + '••••••••••••••••••••••••••••' + udid.slice(-6);
+}
+
 function stopLoading() {
     installZone.classList.remove('is-loading');
 }
@@ -72,7 +84,7 @@ async function init() {
                 const devices = Array.isArray(it.provisionedDevices) ? it.provisionedDevices : [];
                 if (devices.length) {
                     const rows = devices.map((udid, i) =>
-                        `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid">${udid}</code></div>`
+                        `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid" title="${udid}">${maskUdid(udid)}</code></div>`
                     ).join('');
                     const detailsEl = document.createElement('details');
                     detailsEl.className = 'devices-details install-devices';
