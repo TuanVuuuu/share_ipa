@@ -50,7 +50,7 @@ const catalogEmpty = document.getElementById('catalog-empty');
 const catalogSub = document.getElementById('catalog-sub');
 const catalogRefreshBtn = document.getElementById('catalog-refresh-btn');
 
-const protectedAreas = [dropZone, progressArea, resultZone, logsContainer, catalogContainer];
+const protectedAreas = [dropZone, progressArea, resultZone];
 
 let isAuthenticated = false;
 let logsSource = null;
@@ -91,9 +91,19 @@ function applyAuthState(authenticated) {
     authStatus.style.display = authenticated ? 'flex' : 'none';
     protectedAreas.forEach(el => el.classList.toggle('locked', !authenticated));
 
+    catalogContainer.style.display = authenticated ? '' : 'none';
+    logsContainer.style.display = authenticated ? '' : 'none';
+
     if (authenticated) {
         connectLogs();
         loadCatalog();
+    } else {
+        setCatalogLoading(false);
+        clearTimeout(logsReconnectTimer);
+        if (logsSource) {
+            logsSource.close();
+            logsSource = null;
+        }
     }
 }
 
@@ -329,11 +339,6 @@ logoutBtn.addEventListener('click', async () => {
     try {
         await fetch('/api/logout', { method: 'POST' });
     } catch (err) { /* ignore */ }
-    clearTimeout(logsReconnectTimer);
-    if (logsSource) {
-        logsSource.close();
-        logsSource = null;
-    }
     applyAuthState(false);
 });
 
