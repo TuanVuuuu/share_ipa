@@ -17,7 +17,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '6';
+const ASSET_VERSION = process.env.ASSET_VERSION || '7';
 
 console.log('========== ENV ==========');
 console.log('__dirname:', __dirname);
@@ -571,7 +571,30 @@ app.post('/api/upload-chunk', chunkUpload.single('chunk'), async (req, res) => {
     }
 });
 
+// ─── Job store: theo dõi tiến trình xử lý IPA nền ───────────────────────────
+// Mỗi entry: { status: 'pending'|'done'|'error', result, error, createdAt }
+const jobStore = new Map();
+
+// Dọn dẹp job cũ hơn 30 phút để tránh rò rỉ bộ nhớ
+setInterval(() => {
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    for (const [id, job] of jobStore) {
+        if (job.createdAt < cutoff) jobStore.delete(id);
+    }
+}, 5 * 60 * 1000);
+
+// Client hỏi kết quả sau khi finalize trả về jobId
+app.get('/api/upload-status/:jobId', requireAuth, (req, res) => {
+    const job = jobStore.get(req.params.jobId);
+    if (!job) return res.status(404).json({ success: false, message: 'Không tìm thấy job.' });
+    if (job.status === 'pending') return res.json({ success: true, status: 'pending' });
+    if (job.status === 'done') return res.json({ success: true, status: 'done', result: job.result });
+    return res.json({ success: false, status: 'error', message: job.error });
+});
+
 // Finalize: ghép các chunk thành file IPA hoàn chỉnh rồi đưa vào pipeline xử lý chung.
+// Trả về jobId NGAY LẬP TỨC để tránh proxy timeout (Cloudflare 100s, v.v.)
+// Client polling /api/upload-status/:jobId mỗi 2 giây để lấy kết quả.
 app.post('/api/upload-finalize', async (req, res) => {
     try {
         const { uploadId = '', totalChunks = '', originalName = '', totalSize = '' } = req.body || {};
@@ -581,31 +604,62 @@ app.post('/api/upload-finalize', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Thiếu thông tin để finalize upload.' });
         }
 
-        const safeOriginalName = path.basename(originalName).replace(/[^\w.\-]/g, '_');
-        const finalFilename = `app_${Date.now()}_${safeOriginalName}`;
-        const finalPath = path.join(UPLOADS_MAIN_DIR, finalFilename);
-
-        await logRealtime(`🧵 Bắt đầu ghép ${total} chunk thành tệp IPA hoàn chỉnh...`, 'info');
-
+        // Kiểm tra nhanh tất cả chunk đã có mặt trước khi nhận job
         for (let i = 0; i < total; i++) {
             const chunkPath = path.join(CHUNKS_DIR, `upload_${uploadId}_${i}`);
             if (!fs.existsSync(chunkPath)) {
                 return res.status(400).json({ success: false, message: `Thiếu chunk #${i}. Vui lòng upload lại.` });
             }
-            const buf = await fs.promises.readFile(chunkPath);
-            await fs.promises.appendFile(finalPath, buf);
-            await fs.promises.unlink(chunkPath);
         }
 
-        const fileStat = await fs.promises.stat(finalPath);
-        const expectedSize = Number(totalSize) || fileStat.size;
-        await logRealtime(`🧵 Ghép chunk hoàn tất (${formatBytes(fileStat.size)}). Chuyển sang xử lý IPA...`, 'success');
+        const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        jobStore.set(jobId, { status: 'pending', createdAt: Date.now() });
 
-        return processUploadedIpa(res, {
-            finalFilename,
-            finalPath,
-            fileSizeBytes: expectedSize
-        });
+        // Trả về jobId ngay — client sẽ polling để nhận kết quả
+        res.json({ success: true, status: 'pending', jobId });
+
+        // Xử lý nặng ở nền, không giữ HTTP connection
+        (async () => {
+            try {
+                const safeOriginalName = path.basename(originalName).replace(/[^\w.\-]/g, '_');
+                const finalFilename = `app_${Date.now()}_${safeOriginalName}`;
+                const finalPath = path.join(UPLOADS_MAIN_DIR, finalFilename);
+
+                await logRealtime(`🧵 Bắt đầu ghép ${total} chunk thành tệp IPA hoàn chỉnh...`, 'info');
+
+                for (let i = 0; i < total; i++) {
+                    const chunkPath = path.join(CHUNKS_DIR, `upload_${uploadId}_${i}`);
+                    const buf = await fs.promises.readFile(chunkPath);
+                    await fs.promises.appendFile(finalPath, buf);
+                    await fs.promises.unlink(chunkPath);
+                }
+
+                const fileStat = await fs.promises.stat(finalPath);
+                const expectedSize = Number(totalSize) || fileStat.size;
+                await logRealtime(`🧵 Ghép chunk hoàn tất (${formatBytes(fileStat.size)}). Chuyển sang xử lý IPA...`, 'success');
+
+                // processUploadedIpa gọi res.json() để trả kết quả — ta dùng mock res để bắt kết quả
+                const mockRes = {
+                    _statusCode: 200,
+                    _body: null,
+                    status(code) { this._statusCode = code; return this; },
+                    json(body) { this._body = body; }
+                };
+
+                await processUploadedIpa(mockRes, { finalFilename, finalPath, fileSizeBytes: expectedSize });
+
+                if (mockRes._statusCode >= 200 && mockRes._statusCode < 300 && mockRes._body?.success) {
+                    jobStore.set(jobId, { status: 'done', result: mockRes._body, createdAt: Date.now() });
+                } else {
+                    const errMsg = mockRes._body?.message || 'Lỗi không xác định khi xử lý IPA.';
+                    jobStore.set(jobId, { status: 'error', error: errMsg, createdAt: Date.now() });
+                    logToUI(`❌ Xử lý IPA thất bại (job ${jobId}): ${errMsg}`, 'error');
+                }
+            } catch (err) {
+                jobStore.set(jobId, { status: 'error', error: err.message, createdAt: Date.now() });
+                logToUI(`❌ Lỗi finalize nền (job ${jobId}): ${err.message}`, 'error');
+            }
+        })();
     } catch (err) {
         logToUI(`❌ Lỗi finalize upload chunk: ${err.message}`, 'error');
         return res.status(500).json({ success: false, message: `Lỗi ghép chunk: ${err.message}` });

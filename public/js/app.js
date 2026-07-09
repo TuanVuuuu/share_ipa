@@ -607,30 +607,74 @@ async function uploadSecure(file) {
         updateProgress(92, 'Đã tải lên xong. Máy chủ đang ghép chunk và phân tích IPA...');
         setActivity('Máy chủ đang ghép các phần tệp và phân tích IPA', 'active');
 
+        // Gửi yêu cầu finalize — server trả về jobId NGAY, không chờ xử lý xong
+        // (tránh proxy timeout Cloudflare 100s khi xử lý file lớn)
+        const finalizeController = new AbortController();
+        const finalizeTimeout = setTimeout(() => finalizeController.abort(), 30 * 1000);
+        let jobId;
+        try {
+            const finalizeRes = await fetch('/api/upload-finalize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uploadId,
+                    totalChunks,
+                    originalName: file.name,
+                    totalSize: file.size
+                }),
+                signal: finalizeController.signal
+            });
+            const finalizeData = await finalizeRes.json().catch(() => null);
+            if (!finalizeRes.ok || !finalizeData || !finalizeData.success) {
+                throw new Error((finalizeData && finalizeData.message) || `Lỗi khởi động xử lý (mã ${finalizeRes.status}).`);
+            }
+            jobId = finalizeData.jobId;
+        } finally {
+            clearTimeout(finalizeTimeout);
+        }
+
+        // Polling kết quả — mỗi 2 giây hỏi /api/upload-status/:jobId cho đến khi xong hoặc lỗi
         let p = 92;
         clearInterval(progressTimer);
         progressTimer = setInterval(() => {
-            p = Math.min(p + 0.5, 98);
+            p = Math.min(p + 0.3, 98);
             updateProgress(p, 'Máy chủ đang xử lý IPA và tạo liên kết chia sẻ...');
         }, 400);
 
-        const finalizeRes = await fetch('/api/upload-finalize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                uploadId,
-                totalChunks,
-                originalName: file.name,
-                totalSize: file.size
-            })
-        });
+        const POLL_INTERVAL = 2000;
+        const POLL_MAX_WAIT = 10 * 60 * 1000; // tối đa 10 phút
+        const pollStart = Date.now();
+        let result = null;
 
-        const result = await finalizeRes.json().catch(() => null);
-        clearInterval(progressTimer);
-        if (!finalizeRes.ok || !result || !result.success) {
-            throw new Error((result && result.message) || `Lỗi xử lý từ máy chủ (mã ${finalizeRes.status}).`);
+        while (true) {
+            await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+            if (Date.now() - pollStart > POLL_MAX_WAIT) {
+                throw new Error('Máy chủ xử lý quá 10 phút, vui lòng kiểm tra Log Terminal hoặc thử lại.');
+            }
+
+            let statusData;
+            try {
+                const statusRes = await fetch(`/api/upload-status/${jobId}`);
+                statusData = await statusRes.json().catch(() => null);
+            } catch (_) {
+                // Lỗi mạng tạm thời — thử lại vòng tiếp
+                continue;
+            }
+
+            if (!statusData) continue;
+
+            if (statusData.status === 'done' && statusData.result) {
+                result = statusData.result;
+                break;
+            }
+            if (statusData.status === 'error') {
+                throw new Error(statusData.message || 'Máy chủ xử lý IPA thất bại.');
+            }
+            // status === 'pending' -> tiếp tục chờ
         }
 
+        clearInterval(progressTimer);
         renderSuccess(result, startedAt);
     } catch (err) {
         clearInterval(progressTimer);
