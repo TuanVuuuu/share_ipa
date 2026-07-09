@@ -17,7 +17,81 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '8';
+const ASSET_VERSION = process.env.ASSET_VERSION || '9';
+
+// ─── Cloudflare R2 ──────────────────────────────────────────────────────────
+// File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
+// Nếu biến môi trường chưa set, hệ thống tự động fallback về luồng chunk cũ.
+let r2Client = null;
+let _R2Cmd = {};
+let r2GetSignedUrl = null;
+
+function isR2Configured() {
+    return !!(
+        process.env.R2_ACCOUNT_ID &&
+        process.env.R2_ACCESS_KEY_ID &&
+        process.env.R2_SECRET_ACCESS_KEY &&
+        process.env.R2_BUCKET &&
+        process.env.R2_PUBLIC_URL
+    );
+}
+
+if (isR2Configured()) {
+    try {
+        const { S3Client, CreateMultipartUploadCommand, UploadPartCommand,
+                CompleteMultipartUploadCommand, AbortMultipartUploadCommand,
+                DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+        const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+
+        r2Client = new S3Client({
+            region: 'auto',
+            endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+            credentials: {
+                accessKeyId: process.env.R2_ACCESS_KEY_ID,
+                secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+            },
+        });
+
+        _R2Cmd = {
+            CreateMultipartUploadCommand, UploadPartCommand,
+            CompleteMultipartUploadCommand, AbortMultipartUploadCommand,
+            DeleteObjectCommand, GetObjectCommand,
+        };
+        r2GetSignedUrl = getSignedUrl;
+        console.log('[R2] ✅ Client đã khởi tạo. Bucket:', process.env.R2_BUCKET);
+    } catch (err) {
+        console.error('[R2] ❌ Không thể khởi tạo client:', err.message);
+        r2Client = null;
+    }
+} else {
+    console.log('[R2] ⚠️  Chưa cấu hình — sẽ dùng luồng chunk upload cũ.');
+}
+
+// Xóa một object khỏi R2. Dùng khi dọn dẹp bản build cũ để giữ dưới 10GB.
+async function deleteR2Object(key) {
+    if (!r2Client || !key) return;
+    try {
+        await r2Client.send(new _R2Cmd.DeleteObjectCommand({
+            Bucket: process.env.R2_BUCKET,
+            Key: key,
+        }));
+        console.log('[R2] 🗑️  Deleted:', key);
+    } catch (err) {
+        console.error('[R2] ❌ Delete failed:', key, err.message);
+    }
+}
+
+// Helper: stream R2 GetObject body xuống file local (dùng khi finalize cần parse IPA)
+function streamToFile(readable, filePath) {
+    return new Promise((resolve, reject) => {
+        const ws = fs.createWriteStream(filePath);
+        readable.pipe(ws);
+        readable.on('error', reject);
+        ws.on('finish', resolve);
+        ws.on('error', reject);
+    });
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 console.log('========== ENV ==========');
 console.log('__dirname:', __dirname);
@@ -218,11 +292,13 @@ async function readCatalog() {
     }
 }
 
-// 💾 Thêm một bản ghi app mới vào đầu danh mục và đẩy lên GitHub
+// 💾 Thêm một bản ghi app mới vào đầu danh mục và đẩy lên GitHub.
+// Tự động dọn dẹp: giới hạn 10 build/app (R2) và CATALOG_MAX_ITEMS toàn cục.
+// Trả về mảng các entry bị xóa (để caller xóa R2 object tương ứng nếu cần).
 async function appendToCatalog(record) {
     if (!github.isConfigured()) {
         logToUI('⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên bỏ qua bước lưu danh mục.', 'info');
-        return;
+        return [];
     }
 
     const file = await github.getFile(CATALOG_PATH);
@@ -239,8 +315,32 @@ async function appendToCatalog(record) {
         }
     }
 
+    const removed = [];
+
+    // Per-app limit: giữ tối đa 10 build/app trong R2 — xóa bản cũ nhất trước khi thêm mới
+    if (record.r2ObjectKey && record.bundleId) {
+        const MAX_PER_APP = 10;
+        const appBuilds = list
+            .filter(item => item.bundleId === record.bundleId && item.r2ObjectKey)
+            .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+
+        if (appBuilds.length >= MAX_PER_APP) {
+            const toEvict = appBuilds.slice(MAX_PER_APP - 1); // giữ MAX_PER_APP-1 cũ + 1 mới = MAX_PER_APP
+            for (const old of toEvict) {
+                removed.push(old);
+                const idx = list.indexOf(old);
+                if (idx !== -1) list.splice(idx, 1);
+            }
+        }
+    }
+
     list.unshift(record);
-    if (list.length > CATALOG_MAX_ITEMS) list = list.slice(0, CATALOG_MAX_ITEMS);
+
+    // Global catalog limit
+    if (list.length > CATALOG_MAX_ITEMS) {
+        const trimmed = list.splice(CATALOG_MAX_ITEMS);
+        removed.push(...trimmed);
+    }
 
     await github.putFile(
         CATALOG_PATH,
@@ -248,6 +348,8 @@ async function appendToCatalog(record) {
         `add ${record.appName} ${record.version} (${record.buildNumber})`,
         sha
     );
+
+    return removed;
 }
 
 app.get('/api/catalog', async (req, res) => {
@@ -402,8 +504,9 @@ function receiveUpload(req, res, next) {
 }
 
 // 🧠 HÀM DÙNG CHUNG: bóc tách IPA đã nằm sẵn trên đĩa -> tạo link -> trả phản hồi -> lưu trữ ở nền.
-// Dùng cho cả upload 1 lần (upload-secure) lẫn upload chia nhỏ (upload-finalize).
-async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes }) {
+// Dùng cho cả upload 1 lần (upload-secure), chunk cũ (upload-finalize), lẫn R2 (r2-finalize).
+// r2ObjectKey: nếu có, IPA đang nằm trên R2 → dùng URL R2 trong plist, bỏ qua local archive.
+async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes, r2ObjectKey = null }) {
     const startTime = performance.now();
     const formattedTotalSize = formatBytes(fileSizeBytes);
 
@@ -427,9 +530,14 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
 
             await logRealtime(`✅ Phân tích cấu trúc thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} trong ${totalProcessTime} giây`, 'success');
 
+            // URL công khai của file IPA: R2 (nếu upload qua R2) hoặc local (legacy)
+            const ipaPublicUrl = r2ObjectKey
+                ? `${process.env.R2_PUBLIC_URL}/${r2ObjectKey}`
+                : `${PUBLIC_BASE_URL}/uploads/${finalFilename}`;
+
             const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${PUBLIC_BASE_URL}/uploads/${finalFilename}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
+<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${ipaPublicUrl}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
 
             const plistFilename = `${finalFilename}.plist`;
             await fs.promises.writeFile(path.join(UPLOADS_MAIN_DIR, plistFilename), plistContent);
@@ -451,41 +559,46 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
 
             (async () => {
                 try {
-                    const safeAppName = appInfo.appName.replace(/[/\\?%*:|"<>\s]/g, '_');
-                    const appStorageDirName = `${safeAppName}_${appInfo.bundleId}`;
-                    const targetAppFolder = path.join(ARCHIVE_STORAGE_DIR, appStorageDirName);
+                    if (!r2ObjectKey) {
+                        // ── Chế độ legacy: lưu bản sao vật lý trên ổ đĩa local ──
+                        const safeAppName = appInfo.appName.replace(/[/\\?%*:|"<>\s]/g, '_');
+                        const appStorageDirName = `${safeAppName}_${appInfo.bundleId}`;
+                        const targetAppFolder = path.join(ARCHIVE_STORAGE_DIR, appStorageDirName);
 
-                    if (!fs.existsSync(targetAppFolder)) fs.mkdirSync(targetAppFolder, { recursive: true });
+                        if (!fs.existsSync(targetAppFolder)) fs.mkdirSync(targetAppFolder, { recursive: true });
 
-                    await logRealtime('🗄️ Đang sao lưu bản build vào kho lưu trữ...', 'info');
-                    await fs.promises.copyFile(finalPath, path.join(targetAppFolder, finalFilename));
+                        await logRealtime('🗄️ Đang sao lưu bản build vào kho lưu trữ...', 'info');
+                        await fs.promises.copyFile(finalPath, path.join(targetAppFolder, finalFilename));
 
-                    const metadataInfo = {
-                        ...appInfo,
-                        filename: finalFilename,
-                        fileSize: formattedTotalSize,
-                        uploadedAt,
-                        processTimeSeconds: totalProcessTime
-                    };
-                    await fs.promises.writeFile(path.join(targetAppFolder, `${finalFilename}.json`), JSON.stringify(metadataInfo, null, 4));
+                        const metadataInfo = {
+                            ...appInfo,
+                            filename: finalFilename,
+                            fileSize: formattedTotalSize,
+                            uploadedAt,
+                            processTimeSeconds: totalProcessTime
+                        };
+                        await fs.promises.writeFile(path.join(targetAppFolder, `${finalFilename}.json`), JSON.stringify(metadataInfo, null, 4));
 
-                    const currentFiles = fs.readdirSync(targetAppFolder);
-                    const ipaFiles = currentFiles
-                        .filter(f => f.endsWith('.ipa'))
-                        .map(f => {
-                            const filePath = path.join(targetAppFolder, f);
-                            return { name: f, path: filePath, ctime: fs.statSync(filePath).ctimeMs };
-                        })
-                        .sort((a, b) => a.ctime - b.ctime);
+                        const currentFiles = fs.readdirSync(targetAppFolder);
+                        const ipaFiles = currentFiles
+                            .filter(f => f.endsWith('.ipa'))
+                            .map(f => {
+                                const filePath = path.join(targetAppFolder, f);
+                                return { name: f, path: filePath, ctime: fs.statSync(filePath).ctimeMs };
+                            })
+                            .sort((a, b) => a.ctime - b.ctime);
 
-                    if (ipaFiles.length > 10) {
-                        const deleteCount = ipaFiles.length - 10;
-                        await logRealtime(`⚠️ Vượt quá 10 bản build. Tiến hành tự động xóa bỏ ${deleteCount} tệp cũ...`, 'info');
-                        for (let k = 0; k < deleteCount; k++) {
-                            if (fs.existsSync(ipaFiles[k].path)) fs.unlinkSync(ipaFiles[k].path);
-                            if (fs.existsSync(ipaFiles[k].path + '.json')) fs.unlinkSync(ipaFiles[k].path + '.json');
+                        if (ipaFiles.length > 10) {
+                            const deleteCount = ipaFiles.length - 10;
+                            await logRealtime(`⚠️ Vượt quá 10 bản build. Tiến hành tự động xóa bỏ ${deleteCount} tệp cũ...`, 'info');
+                            for (let k = 0; k < deleteCount; k++) {
+                                if (fs.existsSync(ipaFiles[k].path)) fs.unlinkSync(ipaFiles[k].path);
+                                if (fs.existsSync(ipaFiles[k].path + '.json')) fs.unlinkSync(ipaFiles[k].path + '.json');
+                            }
                         }
                     }
+                    // ── R2 mode: file đã nằm trên R2, không cần lưu local ──
+                    // (file tạm sẽ bị xóa bởi r2-finalize sau khi hàm này return)
 
                     let qrDataUrl = '';
                     try {
@@ -503,14 +616,25 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                         icon: iconBase64,
                         qr: qrDataUrl,
                         fileSize: formattedTotalSize,
+                        fileSizeBytes,                   // raw bytes để tính dung lượng R2
                         shareUrl,
                         downloadUrl,
                         uploadedAt,
-                        processTimeSeconds: totalProcessTime
+                        processTimeSeconds: totalProcessTime,
+                        r2ObjectKey: r2ObjectKey || null, // null = legacy local storage
                     };
 
                     await logRealtime('☁️ Đang đồng bộ thông tin app lên danh mục GitHub...', 'info');
-                    await appendToCatalog(catalogRecord);
+                    const removedFromCatalog = await appendToCatalog(catalogRecord);
+
+                    // Xóa R2 objects của các entry bị loại khỏi danh mục
+                    for (const item of removedFromCatalog) {
+                        if (item.r2ObjectKey) {
+                            await deleteR2Object(item.r2ObjectKey);
+                            logToUI(`🗑️ R2 cleanup: ${item.appName} ${item.version} (${item.fileSize || ''})`, 'info');
+                        }
+                    }
+
                     await logRealtime('🗂️ Đã lưu xong danh mục. Toàn bộ quy trình hoàn tất!', 'success');
                 } catch (bgErr) {
                     console.error('[BACKGROUND] Lỗi xử lý nền:', bgErr.message);
@@ -665,6 +789,139 @@ app.post('/api/upload-finalize', async (req, res) => {
         return res.status(500).json({ success: false, message: `Lỗi ghép chunk: ${err.message}` });
     }
 });
+
+// ─── Cloudflare R2 Upload API ────────────────────────────────────────────────
+app.use('/api/r2-start',    requireAuth);
+app.use('/api/r2-part-url', requireAuth);
+app.use('/api/r2-finalize', requireAuth);
+
+// Bước 1: Khởi tạo multipart upload trên R2, nhận UploadId + objectKey
+app.post('/api/r2-start', async (req, res) => {
+    if (!r2Client) {
+        return res.json({ success: false, r2Available: false, message: 'R2 chưa được cấu hình trên máy chủ.' });
+    }
+    try {
+        const { originalName = 'app.ipa' } = req.body;
+        const safeName = path.basename(originalName).replace(/[^\w.\-]/g, '_');
+        const objectKey = `uploads/app_${Date.now()}_${safeName}`;
+
+        const { UploadId } = await r2Client.send(new _R2Cmd.CreateMultipartUploadCommand({
+            Bucket: process.env.R2_BUCKET,
+            Key: objectKey,
+        }));
+
+        logToUI(`🚀 R2 multipart upload bắt đầu: ${safeName}`, 'info');
+        return res.json({ success: true, r2Available: true, r2UploadId: UploadId, objectKey });
+    } catch (err) {
+        console.error('[R2] r2-start error:', err.message);
+        return res.status(500).json({ success: false, message: `Lỗi khởi tạo R2 upload: ${err.message}` });
+    }
+});
+
+// Bước 2: Server ký presigned URL để client PUT từng part thẳng lên R2
+app.post('/api/r2-part-url', async (req, res) => {
+    if (!r2Client) return res.status(500).json({ success: false, message: 'R2 chưa được cấu hình.' });
+    try {
+        const { r2UploadId, objectKey, partNumber } = req.body;
+        if (!r2UploadId || !objectKey || !partNumber) {
+            return res.status(400).json({ success: false, message: 'Thiếu tham số r2UploadId/objectKey/partNumber.' });
+        }
+        const url = await r2GetSignedUrl(
+            r2Client,
+            new _R2Cmd.UploadPartCommand({
+                Bucket: process.env.R2_BUCKET,
+                Key: objectKey,
+                UploadId: r2UploadId,
+                PartNumber: Number(partNumber),
+            }),
+            { expiresIn: 3600 }
+        );
+        return res.json({ success: true, presignedUrl: url });
+    } catch (err) {
+        console.error('[R2] r2-part-url error:', err.message);
+        return res.status(500).json({ success: false, message: `Lỗi tạo presigned URL: ${err.message}` });
+    }
+});
+
+// Bước 3: Hoàn tất multipart upload, kích hoạt xử lý IPA ở nền
+// Trả về jobId ngay, client polling /api/upload-status/:jobId
+app.post('/api/r2-finalize', async (req, res) => {
+    if (!r2Client) return res.status(500).json({ success: false, message: 'R2 chưa được cấu hình.' });
+    try {
+        const { r2UploadId, objectKey, parts, originalName = '', totalSize = 0 } = req.body;
+
+        if (!r2UploadId || !objectKey || !Array.isArray(parts) || !parts.length) {
+            return res.status(400).json({ success: false, message: 'Thiếu thông tin để hoàn tất R2 upload.' });
+        }
+
+        // Hoàn tất multipart upload trên R2 (R2 ghép tất cả parts lại)
+        await r2Client.send(new _R2Cmd.CompleteMultipartUploadCommand({
+            Bucket: process.env.R2_BUCKET,
+            Key: objectKey,
+            UploadId: r2UploadId,
+            MultipartUpload: {
+                Parts: parts
+                    .map(p => ({ PartNumber: Number(p.partNumber), ETag: p.etag }))
+                    .sort((a, b) => a.PartNumber - b.PartNumber),
+            },
+        }));
+
+        const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        jobStore.set(jobId, { status: 'pending', createdAt: Date.now() });
+        res.json({ success: true, status: 'pending', jobId });
+
+        // Xử lý nền: tải IPA từ R2 về temp → parse → trả kết quả → dọn temp
+        (async () => {
+            const tmpFilename = `tmp_${jobId}_${path.basename(objectKey)}`;
+            const tmpPath = path.join(UPLOADS_MAIN_DIR, tmpFilename);
+            try {
+                await logRealtime('☁️ R2 đã nhận xong. Đang tải IPA về máy chủ để phân tích...', 'info');
+
+                const { Body } = await r2Client.send(new _R2Cmd.GetObjectCommand({
+                    Bucket: process.env.R2_BUCKET,
+                    Key: objectKey,
+                }));
+                await streamToFile(Body, tmpPath);
+
+                const fileStat = await fs.promises.stat(tmpPath);
+                await logRealtime(`✅ Đã tải về (${formatBytes(fileStat.size)}). Đang phân tích IPA...`, 'success');
+
+                const finalFilename = path.basename(objectKey);
+                const mockRes = {
+                    _statusCode: 200, _body: null,
+                    status(c) { this._statusCode = c; return this; },
+                    json(b) { this._body = b; },
+                };
+
+                await processUploadedIpa(mockRes, {
+                    finalFilename,
+                    finalPath: tmpPath,
+                    fileSizeBytes: Number(totalSize) || fileStat.size,
+                    r2ObjectKey: objectKey,
+                });
+
+                if (mockRes._statusCode >= 200 && mockRes._statusCode < 300 && mockRes._body?.success) {
+                    jobStore.set(jobId, { status: 'done', result: mockRes._body, createdAt: Date.now() });
+                } else {
+                    const errMsg = mockRes._body?.message || 'Lỗi không xác định khi xử lý IPA.';
+                    jobStore.set(jobId, { status: 'error', error: errMsg, createdAt: Date.now() });
+                    logToUI(`❌ R2 IPA processing failed (job ${jobId}): ${errMsg}`, 'error');
+                    await deleteR2Object(objectKey); // Dọn object lỗi khỏi R2
+                }
+            } catch (err) {
+                jobStore.set(jobId, { status: 'error', error: err.message, createdAt: Date.now() });
+                logToUI(`❌ Lỗi r2-finalize nền (job ${jobId}): ${err.message}`, 'error');
+                await deleteR2Object(objectKey);
+            } finally {
+                fs.promises.unlink(tmpPath).catch(() => {});
+            }
+        })();
+    } catch (err) {
+        logToUI(`❌ Lỗi r2-finalize: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi hoàn tất R2 upload: ${err.message}` });
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
 
 const server = app.listen(PORT, () => console.log(`Diawi Local-First System active on port ${PORT}`));
 server.timeout = 600000;

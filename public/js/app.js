@@ -523,55 +523,263 @@ function armStallWatch() {
     }, 15000);
 }
 
+// ─── Shared upload helpers ───────────────────────────────────────────────────
+let _uploadCompletedBytes = 0;
+let _uploadInFlightBytes = {};
+let _uploadStartTs = 0;
+const _speedSamples = [];
+
+function _resetUploadState() {
+    _uploadCompletedBytes = 0;
+    _uploadInFlightBytes = {};
+    _uploadStartTs = performance.now();
+    _speedSamples.length = 0;
+}
+
+function _recordSpeedSample() {
+    const now = performance.now();
+    const total = _uploadCompletedBytes + Object.values(_uploadInFlightBytes).reduce((a, b) => a + b, 0);
+    _speedSamples.push({ t: now, b: total });
+    if (_speedSamples.length > 60) _speedSamples.shift();
+}
+
+function _getSlidingSpeed() {
+    const now = performance.now();
+    const windowMs = 8000;
+    while (_speedSamples.length > 1 && now - _speedSamples[0].t > windowMs) _speedSamples.shift();
+    if (_speedSamples.length < 2) {
+        const elapsedSec = (now - _uploadStartTs) / 1000;
+        const total = _uploadCompletedBytes + Object.values(_uploadInFlightBytes).reduce((a, b) => a + b, 0);
+        return elapsedSec > 0 ? total / elapsedSec : 0;
+    }
+    const dt = (_speedSamples[_speedSamples.length - 1].t - _speedSamples[0].t) / 1000;
+    const db = _speedSamples[_speedSamples.length - 1].b - _speedSamples[0].b;
+    return dt > 0 ? db / dt : 0;
+}
+
+function _refreshProgress(fileSize, concurrency) {
+    const totalSent = _uploadCompletedBytes + Object.values(_uploadInFlightBytes).reduce((a, b) => a + b, 0);
+    const speed = _getSlidingSpeed();
+    const pct = (totalSent / fileSize) * 100;
+    const mapped = Math.min(pct * 0.9, 90);
+    updateProgress(mapped, `Đang tải lên: ${Math.round(pct)}% (${formatBytesClient(totalSent)} / ${formatBytesClient(fileSize)})`);
+    progressSpeed.innerText = formatSpeed(speed);
+    progressEta.innerText = speed > 0 ? formatEta((fileSize - totalSent) / speed) : '--';
+    setActivity(`Đang truyền ${concurrency} luồng song song • ${formatBytesClient(totalSent)} / ${formatBytesClient(fileSize)} • ${formatSpeed(speed)}`, 'active');
+}
+
+// Polling kết quả xử lý IPA sau khi server nhận jobId
+async function _pollJobResult(jobId) {
+    let p = 92;
+    clearInterval(progressTimer);
+    progressTimer = setInterval(() => {
+        p = Math.min(p + 0.3, 98);
+        updateProgress(p, 'Máy chủ đang xử lý IPA và tạo liên kết chia sẻ...');
+    }, 400);
+
+    const pollStart = Date.now();
+    while (true) {
+        await new Promise(r => setTimeout(r, 2000));
+        if (Date.now() - pollStart > 10 * 60 * 1000) {
+            throw new Error('Máy chủ xử lý quá 10 phút, vui lòng kiểm tra Log Terminal hoặc thử lại.');
+        }
+        let statusData;
+        try {
+            const statusRes = await fetch(`/api/upload-status/${jobId}`);
+            statusData = await statusRes.json().catch(() => null);
+        } catch (_) { continue; }
+
+        if (!statusData) continue;
+        if (statusData.status === 'done' && statusData.result) return statusData.result;
+        if (statusData.status === 'error') throw new Error(statusData.message || 'Máy chủ xử lý IPA thất bại.');
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function uploadSecure(file) {
     const startedAt = startProcessingUI();
-    const CHUNK_SIZE = 3 * 1024 * 1024;   // 3MB/chunk: cân bằng tốt cho Cloudflare Tunnel (retry rẻ, hoàn thành nhanh)
-    const CONCURRENCY = 4;                 // số chunk gửi song song
-    const MAX_RETRY = 3;                   // tự thử lại chunk lỗi trước khi bỏ cuộc
+    _resetUploadState();
+
+    // Thử R2 direct upload trước; nếu server chưa cấu hình R2 thì fallback chunk cũ
+    let r2Info = null;
+    try {
+        const r2StartRes = await fetch('/api/r2-start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ originalName: file.name }),
+        });
+        const r2StartData = await r2StartRes.json().catch(() => null);
+        if (r2StartData && r2StartData.success && r2StartData.r2Available) {
+            r2Info = { r2UploadId: r2StartData.r2UploadId, objectKey: r2StartData.objectKey };
+        }
+    } catch (_) { /* mạng lỗi → fallback */ }
+
+    if (r2Info) {
+        return uploadViaR2(file, startedAt, r2Info);
+    } else {
+        return uploadViaChunks(file, startedAt);
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LUỒNG R2: client PUT trực tiếp lên Cloudflare R2, không qua Tunnel
+// Part size 8MB (R2 yêu cầu ≥5MB/part trừ part cuối)
+// ══════════════════════════════════════════════════════════════════════════════
+async function uploadViaR2(file, startedAt, { r2UploadId, objectKey }) {
+    const PART_SIZE  = 8 * 1024 * 1024; // 8MB/part
+    const CONCURRENCY = 4;
+    const MAX_RETRY  = 3;
+    const totalParts = Math.ceil(file.size / PART_SIZE);
+    const collectedParts = []; // { partNumber, etag }
+
+    // PUT 1 part thẳng lên R2 qua presigned URL, trả về ETag
+    const callR2PartApi = (partBlob, partNumber) => {
+        return new Promise((resolve, reject) => {
+            let attempt = 0;
+
+            async function tryUpload() {
+                // Lấy presigned URL từ server (nhỏ, qua tunnel, rất nhanh)
+                let presignedUrl;
+                try {
+                    const res = await fetch('/api/r2-part-url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ r2UploadId, objectKey, partNumber }),
+                    });
+                    const data = await res.json().catch(() => null);
+                    if (!data || !data.success) throw new Error((data && data.message) || 'Lỗi lấy presigned URL.');
+                    presignedUrl = data.presignedUrl;
+                } catch (err) { handleError(err); return; }
+
+                // PUT blob thẳng lên R2 (không qua Cloudflare Tunnel!)
+                const xhr = new XMLHttpRequest();
+                _uploadInFlightBytes[partNumber] = 0;
+
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (!e.lengthComputable) return;
+                    _uploadInFlightBytes[partNumber] = e.loaded;
+                    _recordSpeedSample();
+                    _refreshProgress(file.size, CONCURRENCY);
+                    armStallWatch();
+                });
+
+                xhr.addEventListener('load', () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        const etag = xhr.getResponseHeader('ETag');
+                        _uploadInFlightBytes[partNumber] = partBlob.size;
+                        resolve({ partNumber, etag });
+                    } else {
+                        handleError(new Error(`Part #${partNumber} thất bại (HTTP ${xhr.status}).`));
+                    }
+                });
+                xhr.addEventListener('error', () => handleError(new Error(`Lỗi mạng gửi part #${partNumber}.`)));
+                xhr.addEventListener('timeout', () => handleError(new Error(`Part #${partNumber} timeout (>120s).`)));
+                xhr.timeout = 120 * 1000;
+
+                xhr.open('PUT', presignedUrl);
+                xhr.send(partBlob);
+            }
+
+            function handleError(err) {
+                delete _uploadInFlightBytes[partNumber];
+                attempt++;
+                if (attempt > MAX_RETRY) { reject(err); return; }
+                setTimeout(tryUpload, Math.min(1000 * Math.pow(2, attempt - 1), 8000));
+            }
+
+            tryUpload();
+        });
+    };
+
+    try {
+        armStallWatch();
+        _recordSpeedSample();
+        setActivity(`R2 direct upload — ${CONCURRENCY} luồng song song (không qua Tunnel)...`, 'active');
+
+        let nextPart = 1; // R2 partNumber bắt đầu từ 1
+        const worker = async () => {
+            while (nextPart <= totalParts) {
+                const pNum = nextPart++;
+                const start = (pNum - 1) * PART_SIZE;
+                const end = Math.min(start + PART_SIZE, file.size);
+                const blob = file.slice(start, end);
+                const { partNumber, etag } = await callR2PartApi(blob, pNum);
+                _uploadCompletedBytes += (end - start);
+                delete _uploadInFlightBytes[partNumber];
+                collectedParts.push({ partNumber, etag });
+                _recordSpeedSample();
+                _refreshProgress(file.size, CONCURRENCY);
+            }
+        };
+
+        const workers = [];
+        for (let w = 0; w < Math.min(CONCURRENCY, totalParts); w++) workers.push(worker());
+        await Promise.all(workers);
+
+        clearStallWatch();
+        updateProgress(92, 'Upload R2 hoàn tất. Máy chủ đang ghép và phân tích IPA...');
+        setActivity('R2 đã nhận đủ dữ liệu — máy chủ đang hoàn tất...', 'active');
+
+        // Finalize: gửi danh sách ETags để R2 ghép + server parse IPA ở nền
+        const finCtrl = new AbortController();
+        const finTimeout = setTimeout(() => finCtrl.abort(), 30 * 1000);
+        let jobId;
+        try {
+            const finRes = await fetch('/api/r2-finalize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    r2UploadId, objectKey,
+                    parts: collectedParts,
+                    originalName: file.name,
+                    totalSize: file.size,
+                }),
+                signal: finCtrl.signal,
+            });
+            const finData = await finRes.json().catch(() => null);
+            if (!finRes.ok || !finData || !finData.success) {
+                throw new Error((finData && finData.message) || `Lỗi r2-finalize (mã ${finRes.status}).`);
+            }
+            jobId = finData.jobId;
+        } finally {
+            clearTimeout(finTimeout);
+        }
+
+        const result = await _pollJobResult(jobId);
+        clearInterval(progressTimer);
+        renderSuccess(result, startedAt);
+    } catch (err) {
+        clearInterval(progressTimer);
+        clearStallWatch();
+        failUpload(err.name === 'AbortError'
+            ? 'Finalize timeout. Vui lòng thử lại.'
+            : (err.message || 'Không thể kết nối tới máy chủ.'));
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LUỒNG FALLBACK: chunk qua server (dùng khi R2 chưa cấu hình)
+// ══════════════════════════════════════════════════════════════════════════════
+async function uploadViaChunks(file, startedAt) {
+    const CHUNK_SIZE  = 3 * 1024 * 1024;
+    const CONCURRENCY = 4;
+    const MAX_RETRY   = 3;
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const uploadId = Date.now().toString() + Math.random().toString(36).slice(2, 8);
 
-    let completedBytes = 0;
-    const inFlightBytes = {};              // { chunkIndex: bytesUploaded } — bytes đang bay trong các chunk chưa xong
-    const uploadStartTs = performance.now();
-
-    // Sliding window speed: chỉ tính tốc độ từ 8 giây gần nhất để hiển thị chính xác hơn
-    const speedSamples = [];
-    function recordSpeedSample() {
-        const now = performance.now();
-        const total = completedBytes + Object.values(inFlightBytes).reduce((a, b) => a + b, 0);
-        speedSamples.push({ t: now, b: total });
-        // Giữ tối đa 60 mẫu
-        if (speedSamples.length > 60) speedSamples.shift();
-    }
-    function getSlidingSpeed() {
-        const now = performance.now();
-        const windowMs = 8000;
-        while (speedSamples.length > 1 && now - speedSamples[0].t > windowMs) speedSamples.shift();
-        if (speedSamples.length < 2) {
-            const elapsedSec = (now - uploadStartTs) / 1000;
-            const total = completedBytes + Object.values(inFlightBytes).reduce((a, b) => a + b, 0);
-            return elapsedSec > 0 ? total / elapsedSec : 0;
-        }
-        const dt = (speedSamples[speedSamples.length - 1].t - speedSamples[0].t) / 1000;
-        const db = speedSamples[speedSamples.length - 1].b - speedSamples[0].b;
-        return dt > 0 ? db / dt : 0;
-    }
-
-    // XHR thay fetch để có xhr.upload.onprogress — tracking byte-level trong lúc gửi
     const callChunkApi = (chunkBlob, index) => {
         return new Promise((resolve, reject) => {
             let attempt = 0;
             const tryUpload = () => {
                 const xhr = new XMLHttpRequest();
-                inFlightBytes[index] = 0;
+                _uploadInFlightBytes[index] = 0;
 
                 xhr.upload.addEventListener('progress', (e) => {
                     if (!e.lengthComputable) return;
-                    inFlightBytes[index] = e.loaded;
-                    recordSpeedSample();
-                    refreshProgress();
-                    armStallWatch(); // reset đồng hồ nghẽn mỗi khi có byte mới
+                    _uploadInFlightBytes[index] = e.loaded;
+                    _recordSpeedSample();
+                    _refreshProgress(file.size, CONCURRENCY);
+                    armStallWatch();
                 });
 
                 xhr.addEventListener('load', () => {
@@ -583,17 +791,15 @@ async function uploadSecure(file) {
                         onError(new Error((data && data.message) || `Chunk #${index + 1} thất bại (HTTP ${xhr.status}).`));
                     }
                 });
-
-                xhr.addEventListener('error', () => onError(new Error(`Lỗi mạng khi gửi chunk #${index + 1}.`)));
-                xhr.addEventListener('timeout', () => onError(new Error(`Chunk #${index + 1} timeout (>90 giây).`)));
+                xhr.addEventListener('error', () => onError(new Error(`Lỗi mạng chunk #${index + 1}.`)));
+                xhr.addEventListener('timeout', () => onError(new Error(`Chunk #${index + 1} timeout.`)));
                 xhr.timeout = 90 * 1000;
 
                 const onError = (err) => {
-                    delete inFlightBytes[index];
+                    delete _uploadInFlightBytes[index];
                     attempt++;
                     if (attempt > MAX_RETRY) { reject(err); return; }
-                    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000); // exponential backoff
-                    setTimeout(tryUpload, delay);
+                    setTimeout(tryUpload, Math.min(1000 * Math.pow(2, attempt - 1), 8000));
                 };
 
                 const formData = new FormData();
@@ -602,7 +808,6 @@ async function uploadSecure(file) {
                 formData.append('chunkIndex', String(index));
                 formData.append('totalChunks', String(totalChunks));
                 formData.append('originalName', file.name);
-
                 xhr.open('POST', '/api/upload-chunk');
                 xhr.send(formData);
             };
@@ -610,36 +815,22 @@ async function uploadSecure(file) {
         });
     };
 
-    const refreshProgress = () => {
-        const totalSent = completedBytes + Object.values(inFlightBytes).reduce((a, b) => a + b, 0);
-        const speed = getSlidingSpeed();
-        const uploadedPercent = (totalSent / file.size) * 100;
-        const mapped = Math.min(uploadedPercent * 0.9, 90);
-        updateProgress(mapped, `Đang tải lên: ${Math.round(uploadedPercent)}% (${formatBytesClient(totalSent)} / ${formatBytesClient(file.size)})`);
-        progressSpeed.innerText = formatSpeed(speed);
-        const remainingBytes = file.size - totalSent;
-        progressEta.innerText = speed > 0 ? formatEta(remainingBytes / speed) : '--';
-        setActivity(`Đang truyền song song ${CONCURRENCY} luồng • ${formatBytesClient(totalSent)} / ${formatBytesClient(file.size)} • ${formatSpeed(speed)}`, 'active');
-    };
-
     try {
         armStallWatch();
-        recordSpeedSample();
-        setActivity(`Đang tải lên song song ${CONCURRENCY} luồng...`, 'active');
+        _recordSpeedSample();
+        setActivity(`Chunk upload — ${CONCURRENCY} luồng song song...`, 'active');
 
-        // Hàng đợi chỉ số chunk + nhóm worker rút việc song song
         let nextIndex = 0;
         const worker = async () => {
             while (nextIndex < totalChunks) {
                 const i = nextIndex++;
                 const start = i * CHUNK_SIZE;
                 const end = Math.min(start + CHUNK_SIZE, file.size);
-                const chunk = file.slice(start, end);
-                await callChunkApi(chunk, i);
-                completedBytes += (end - start);
-                delete inFlightBytes[i];
-                recordSpeedSample();
-                refreshProgress();
+                await callChunkApi(file.slice(start, end), i);
+                _uploadCompletedBytes += (end - start);
+                delete _uploadInFlightBytes[i];
+                _recordSpeedSample();
+                _refreshProgress(file.size, CONCURRENCY);
             }
         };
 
@@ -648,85 +839,36 @@ async function uploadSecure(file) {
         await Promise.all(workers);
 
         clearStallWatch();
-        progressEta.innerText = 'Đã tải xong';
-        updateProgress(92, 'Đã tải lên xong. Máy chủ đang ghép chunk và phân tích IPA...');
-        setActivity('Máy chủ đang ghép các phần tệp và phân tích IPA', 'active');
+        updateProgress(92, 'Đã tải xong. Máy chủ đang ghép chunk và phân tích IPA...');
+        setActivity('Máy chủ đang xử lý...', 'active');
 
-        // Gửi yêu cầu finalize — server trả về jobId NGAY, không chờ xử lý xong
-        // (tránh proxy timeout Cloudflare 100s khi xử lý file lớn)
-        const finalizeController = new AbortController();
-        const finalizeTimeout = setTimeout(() => finalizeController.abort(), 30 * 1000);
+        const finCtrl = new AbortController();
+        const finTimeout = setTimeout(() => finCtrl.abort(), 30 * 1000);
         let jobId;
         try {
-            const finalizeRes = await fetch('/api/upload-finalize', {
+            const finRes = await fetch('/api/upload-finalize', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    uploadId,
-                    totalChunks,
-                    originalName: file.name,
-                    totalSize: file.size
-                }),
-                signal: finalizeController.signal
+                body: JSON.stringify({ uploadId, totalChunks, originalName: file.name, totalSize: file.size }),
+                signal: finCtrl.signal,
             });
-            const finalizeData = await finalizeRes.json().catch(() => null);
-            if (!finalizeRes.ok || !finalizeData || !finalizeData.success) {
-                throw new Error((finalizeData && finalizeData.message) || `Lỗi khởi động xử lý (mã ${finalizeRes.status}).`);
+            const finData = await finRes.json().catch(() => null);
+            if (!finRes.ok || !finData || !finData.success) {
+                throw new Error((finData && finData.message) || `Lỗi finalize (mã ${finRes.status}).`);
             }
-            jobId = finalizeData.jobId;
+            jobId = finData.jobId;
         } finally {
-            clearTimeout(finalizeTimeout);
+            clearTimeout(finTimeout);
         }
 
-        // Polling kết quả — mỗi 2 giây hỏi /api/upload-status/:jobId cho đến khi xong hoặc lỗi
-        let p = 92;
-        clearInterval(progressTimer);
-        progressTimer = setInterval(() => {
-            p = Math.min(p + 0.3, 98);
-            updateProgress(p, 'Máy chủ đang xử lý IPA và tạo liên kết chia sẻ...');
-        }, 400);
-
-        const POLL_INTERVAL = 2000;
-        const POLL_MAX_WAIT = 10 * 60 * 1000; // tối đa 10 phút
-        const pollStart = Date.now();
-        let result = null;
-
-        while (true) {
-            await new Promise(r => setTimeout(r, POLL_INTERVAL));
-
-            if (Date.now() - pollStart > POLL_MAX_WAIT) {
-                throw new Error('Máy chủ xử lý quá 10 phút, vui lòng kiểm tra Log Terminal hoặc thử lại.');
-            }
-
-            let statusData;
-            try {
-                const statusRes = await fetch(`/api/upload-status/${jobId}`);
-                statusData = await statusRes.json().catch(() => null);
-            } catch (_) {
-                // Lỗi mạng tạm thời — thử lại vòng tiếp
-                continue;
-            }
-
-            if (!statusData) continue;
-
-            if (statusData.status === 'done' && statusData.result) {
-                result = statusData.result;
-                break;
-            }
-            if (statusData.status === 'error') {
-                throw new Error(statusData.message || 'Máy chủ xử lý IPA thất bại.');
-            }
-            // status === 'pending' -> tiếp tục chờ
-        }
-
+        const result = await _pollJobResult(jobId);
         clearInterval(progressTimer);
         renderSuccess(result, startedAt);
     } catch (err) {
         clearInterval(progressTimer);
         clearStallWatch();
-        const isAbort = err && (err.name === 'AbortError');
-        failUpload(isAbort
-            ? 'Một chunk upload bị timeout (>60s). Mạng quá chậm hoặc proxy đang nghẽn.'
+        failUpload(err.name === 'AbortError'
+            ? 'Chunk upload bị timeout (>90s). Mạng quá chậm hoặc proxy nghẽn.'
             : (err.message || 'Không thể kết nối tới máy chủ. Kiểm tra mạng rồi thử lại.'));
     }
 }
