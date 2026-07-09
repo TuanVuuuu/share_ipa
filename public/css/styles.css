@@ -900,3 +900,49 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 }
 .modal-card .url-box { width: 100%; }
 .modal-card .btn { width: 100%; }
+
+/* Thẻ thông tin build: iOS version / Profile type / Provisioned devices */
+.build-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+.build-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 20px;
+    padding: 2px 9px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+.build-tag-ios {
+    background: #e8f4fd;
+    color: #1a73e8;
+}
+.build-tag-profile {
+    background: #f0ebff;
+    color: #7c3aed;
+}
+.build-tag-devices {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+/* Thẻ thông tin trong modal QR */
+.qr-modal-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+    margin-top: -4px;
+}
+
+/* Thẻ trên trang install (quét QR) */
+.install-tags {
+    justify-content: center;
+    margin-top: 8px;
+}

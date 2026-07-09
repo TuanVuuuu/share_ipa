@@ -58,11 +58,36 @@
             qrModalInstall
         } = refs;
 
+        function buildBuildMetaTags(item) {
+            const tags = [];
+            if (item.minimumOsVersion) {
+                tags.push(`<span class="build-tag build-tag-ios">iOS ${escapeHtml(item.minimumOsVersion)}+</span>`);
+            }
+            if (item.profileType) {
+                tags.push(`<span class="build-tag build-tag-profile">${escapeHtml(item.profileType)}</span>`);
+            }
+            if (item.provisionedDevicesCount != null) {
+                tags.push(`<span class="build-tag build-tag-devices">${item.provisionedDevicesCount} thiết bị</span>`);
+            }
+            return tags.join('');
+        }
+
         function openQrModal(item) {
             qrModalTitle.innerText = item.appName || 'Ứng dụng';
             qrModalVersion.innerText = `${item.bundleId || ''} • v${item.version} (Build ${item.buildNumber})`;
             qrModalUrl.value = item.shareUrl || '';
             qrModalInstall.href = item.downloadUrl || '#';
+
+            // Cập nhật thẻ thông tin bổ sung trong modal
+            const existingMeta = qrModal.querySelector('.qr-modal-meta');
+            if (existingMeta) existingMeta.remove();
+            const metaTags = buildBuildMetaTags(item);
+            if (metaTags) {
+                const metaEl = document.createElement('div');
+                metaEl.className = 'qr-modal-meta';
+                metaEl.innerHTML = metaTags;
+                qrModalVersion.insertAdjacentElement('afterend', metaEl);
+            }
 
             qrModalImage.innerHTML = '';
             const img = document.createElement('img');
@@ -115,6 +140,7 @@
         function renderBuilds(builds) {
             detailBuilds.innerHTML = '';
             builds.forEach((build, index) => {
+                const metaTags = buildBuildMetaTags(build);
                 const row = document.createElement('div');
                 row.className = 'build-row';
                 row.innerHTML = `
@@ -122,6 +148,7 @@
                         <span class="badge">v${escapeHtml(build.version)} (Build ${escapeHtml(build.buildNumber)})</span>
                         ${index === 0 ? '<span class="build-latest">Mới nhất</span>' : ''}
                         <div class="build-sub">📦 ${escapeHtml(build.fileSize || '--')} • 🕒 ${escapeHtml(formatDateTime(build.uploadedAt))}</div>
+                        ${metaTags ? `<div class="build-tags">${metaTags}</div>` : ''}
                     </div>
                     <div class="build-actions">
                         <button type="button" class="btn secondary qr-btn">Xem QR</button>

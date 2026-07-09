@@ -57,6 +57,17 @@ async function init() {
             if (it.fileSize) parts.push(`📦 ${it.fileSize}`);
             if (it.uploadedAt) parts.push(`🕒 ${formatDateTime(it.uploadedAt)}`);
             installExtra.innerText = parts.join('  •  ');
+
+            const tags = [];
+            if (it.minimumOsVersion) tags.push(`<span class="build-tag build-tag-ios">iOS ${it.minimumOsVersion}+</span>`);
+            if (it.profileType) tags.push(`<span class="build-tag build-tag-profile">${it.profileType}</span>`);
+            if (it.provisionedDevicesCount != null) tags.push(`<span class="build-tag build-tag-devices">${it.provisionedDevicesCount} thiết bị</span>`);
+            if (tags.length) {
+                const tagsEl = document.createElement('div');
+                tagsEl.className = 'build-tags install-tags';
+                tagsEl.innerHTML = tags.join('');
+                installExtra.insertAdjacentElement('afterend', tagsEl);
+            }
         } else {
             installName.innerText = 'Không tìm thấy thông tin bản build';
             installBundle.innerText = data.message || 'Bản build có thể đã bị xoá khỏi danh mục.';

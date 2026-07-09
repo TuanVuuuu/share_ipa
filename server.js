@@ -388,6 +388,9 @@ app.get('/api/app-info', async (req, res) => {
                 bundleId: record.bundleId,
                 version: record.version,
                 buildNumber: record.buildNumber,
+                minimumOsVersion: record.minimumOsVersion || null,
+                profileType: record.profileType || null,
+                provisionedDevicesCount: record.provisionedDevicesCount ?? null,
                 icon: record.icon,
                 fileSize: record.fileSize,
                 uploadedAt: record.uploadedAt,
@@ -417,6 +420,9 @@ app.get('/api/app-builds', async (req, res) => {
                 bundleId: item.bundleId,
                 version: item.version,
                 buildNumber: item.buildNumber,
+                minimumOsVersion: item.minimumOsVersion || null,
+                profileType: item.profileType || null,
+                provisionedDevicesCount: item.provisionedDevicesCount ?? null,
                 icon: item.icon,
                 qr: item.qr,
                 fileSize: item.fileSize,
@@ -503,6 +509,17 @@ function receiveUpload(req, res, next) {
     });
 }
 
+// Xác định loại provisioning profile từ thông tin embedded profile
+function getProfileType(mobileProvision) {
+    if (!mobileProvision) return null;
+    if (mobileProvision.ProvisionsAllDevices) return 'Enterprise';
+    const allowGetTask = (mobileProvision.Entitlements || {})['get-task-allow'];
+    if (Array.isArray(mobileProvision.ProvisionedDevices) && mobileProvision.ProvisionedDevices.length > 0) {
+        return allowGetTask ? 'Development' : 'Ad Hoc';
+    }
+    return allowGetTask ? 'Development' : 'App Store';
+}
+
 // 🧠 HÀM DÙNG CHUNG: bóc tách IPA đã nằm sẵn trên đĩa -> tạo link -> trả phản hồi -> lưu trữ ở nền.
 // Dùng cho cả upload 1 lần (upload-secure), chunk cũ (upload-finalize), lẫn R2 (r2-finalize).
 // r2ObjectKey: nếu có, IPA đang nằm trên R2 → dùng URL R2 trong plist, bỏ qua local archive.
@@ -518,11 +535,17 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
 
         try {
             const result = await parser.parse();
+            const mobileProvision = result.mobileProvision || null;
             const appInfo = {
                 bundleId: result.CFBundleIdentifier || 'com.unknown.app',
                 version: result.CFBundleShortVersionString || '1.0.0',
                 buildNumber: result.CFBundleVersion || '1',
-                appName: result.CFBundleDisplayName || result.CFBundleName || 'Ứng dụng iOS'
+                appName: result.CFBundleDisplayName || result.CFBundleName || 'Ứng dụng iOS',
+                minimumOsVersion: result.MinimumOSVersion || null,
+                profileType: getProfileType(mobileProvision),
+                provisionedDevicesCount: Array.isArray(mobileProvision?.ProvisionedDevices)
+                    ? mobileProvision.ProvisionedDevices.length
+                    : null,
             };
 
             const iconBase64 = result.icon || 'https://cdn-icons-png.flaticon.com/512/5115/5115293.png';
@@ -613,6 +636,9 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                         bundleId: appInfo.bundleId,
                         version: appInfo.version,
                         buildNumber: appInfo.buildNumber,
+                        minimumOsVersion: appInfo.minimumOsVersion,
+                        profileType: appInfo.profileType,
+                        provisionedDevicesCount: appInfo.provisionedDevicesCount,
                         icon: iconBase64,
                         qr: qrDataUrl,
                         fileSize: formattedTotalSize,
