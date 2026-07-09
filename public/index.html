@@ -11,6 +11,7 @@
 </head>
 <body>
 
+<div id="home-view">
 <div class="container">
     <h2>Share IPA</h2>
 
@@ -111,6 +112,81 @@
     </div>
     <p class="catalog-sub" id="catalog-sub">Danh sách các ứng dụng đã xử lý và lưu trữ.</p>
 
+    <div id="catalog-skeleton" class="catalog-skeleton catalog-grid" aria-hidden="true" aria-busy="true">
+        <div class="catalog-sk-card">
+            <div class="catalog-sk-top">
+                <div class="sk sk-catalog-icon"></div>
+                <div class="catalog-sk-info">
+                    <div class="sk sk-line sk-catalog-name"></div>
+                    <div class="sk sk-line sk-catalog-bundle"></div>
+                </div>
+            </div>
+            <div class="sk sk-line sk-catalog-meta"></div>
+            <div class="sk sk-line sk-catalog-meta-short"></div>
+            <div class="sk sk-catalog-btn"></div>
+        </div>
+        <div class="catalog-sk-card">
+            <div class="catalog-sk-top">
+                <div class="sk sk-catalog-icon"></div>
+                <div class="catalog-sk-info">
+                    <div class="sk sk-line sk-catalog-name"></div>
+                    <div class="sk sk-line sk-catalog-bundle"></div>
+                </div>
+            </div>
+            <div class="sk sk-line sk-catalog-meta"></div>
+            <div class="sk sk-line sk-catalog-meta-short"></div>
+            <div class="sk sk-catalog-btn"></div>
+        </div>
+        <div class="catalog-sk-card">
+            <div class="catalog-sk-top">
+                <div class="sk sk-catalog-icon"></div>
+                <div class="catalog-sk-info">
+                    <div class="sk sk-line sk-catalog-name"></div>
+                    <div class="sk sk-line sk-catalog-bundle"></div>
+                </div>
+            </div>
+            <div class="sk sk-line sk-catalog-meta"></div>
+            <div class="sk sk-line sk-catalog-meta-short"></div>
+            <div class="sk sk-catalog-btn"></div>
+        </div>
+        <div class="catalog-sk-card">
+            <div class="catalog-sk-top">
+                <div class="sk sk-catalog-icon"></div>
+                <div class="catalog-sk-info">
+                    <div class="sk sk-line sk-catalog-name"></div>
+                    <div class="sk sk-line sk-catalog-bundle"></div>
+                </div>
+            </div>
+            <div class="sk sk-line sk-catalog-meta"></div>
+            <div class="sk sk-line sk-catalog-meta-short"></div>
+            <div class="sk sk-catalog-btn"></div>
+        </div>
+        <div class="catalog-sk-card">
+            <div class="catalog-sk-top">
+                <div class="sk sk-catalog-icon"></div>
+                <div class="catalog-sk-info">
+                    <div class="sk sk-line sk-catalog-name"></div>
+                    <div class="sk sk-line sk-catalog-bundle"></div>
+                </div>
+            </div>
+            <div class="sk sk-line sk-catalog-meta"></div>
+            <div class="sk sk-line sk-catalog-meta-short"></div>
+            <div class="sk sk-catalog-btn"></div>
+        </div>
+        <div class="catalog-sk-card">
+            <div class="catalog-sk-top">
+                <div class="sk sk-catalog-icon"></div>
+                <div class="catalog-sk-info">
+                    <div class="sk sk-line sk-catalog-name"></div>
+                    <div class="sk sk-line sk-catalog-bundle"></div>
+                </div>
+            </div>
+            <div class="sk sk-line sk-catalog-meta"></div>
+            <div class="sk sk-line sk-catalog-meta-short"></div>
+            <div class="sk sk-catalog-btn"></div>
+        </div>
+    </div>
+
     <div id="catalog-list" class="catalog-grid"></div>
     <div id="catalog-empty" class="catalog-empty" style="display:none;">Chưa có ứng dụng nào trong danh mục.</div>
 </div>
@@ -120,7 +196,52 @@
         🖥️ REAL-TIME SYSTEM TERMINAL LOGS
     </div>
 </div>
+</div>
 
+<div id="app-detail-view" class="spa-view-hidden">
+    <div class="container app-detail-page" id="app-detail-zone">
+        <button type="button" class="catalog-back" id="detail-back">← Quay lại danh mục</button>
+
+        <div class="catalog-head">
+            <h2 id="detail-page-title">Chi tiết ứng dụng</h2>
+            <button type="button" class="btn secondary" id="detail-share-btn" style="display:none;">Chia sẻ</button>
+        </div>
+        <p class="catalog-sub" id="detail-page-sub">Đang tải...</p>
+
+        <div class="detail-content" id="detail-content">
+            <div class="detail-header" id="detail-header" style="display:none;">
+                <img src="" alt="icon" class="detail-icon" id="detail-icon">
+                <div class="detail-header-info">
+                    <h3 id="detail-name"></h3>
+                    <p id="detail-bundle"></p>
+                </div>
+            </div>
+
+            <div id="detail-builds" class="detail-builds"></div>
+        </div>
+        <div id="detail-empty" class="catalog-empty" style="display:none;">Không tìm thấy ứng dụng trong danh mục.</div>
+        <div id="detail-auth" class="catalog-empty" style="display:none;">
+            Vui lòng đăng nhập để xem chi tiết ứng dụng.
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="qr-modal" style="display:none;">
+    <div class="modal-card">
+        <button type="button" class="modal-close" id="qr-modal-close" aria-label="Đóng">&times;</button>
+        <h3 id="qr-modal-title">Tên ứng dụng</h3>
+        <p class="qr-hint" id="qr-modal-version"></p>
+        <div class="qr-code" id="qr-modal-image"></div>
+        <p class="qr-hint">Quét mã QR bằng Camera của iPhone để cài đặt ứng dụng</p>
+        <div class="url-box">
+            <input type="text" id="qr-modal-url" readonly value="">
+            <button type="button" class="btn secondary" id="qr-modal-copy">Sao chép</button>
+        </div>
+        <a href="#" id="qr-modal-install" class="btn">Mở liên kết cài đặt</a>
+    </div>
+</div>
+
+<script src="/js/catalog-detail.js?v=__V__"></script>
 <script src="/js/app.js?v=__V__"></script>
 </body>
 </html>

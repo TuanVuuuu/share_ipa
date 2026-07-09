@@ -504,6 +504,71 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     font-size: 14px;
     padding: 24px 0;
 }
+
+/* Shimmer loading danh mục trang chủ */
+.catalog-skeleton {
+    display: none;
+}
+#catalog-container.is-loading .catalog-skeleton {
+    display: grid;
+}
+#catalog-container.is-loading #catalog-list,
+#catalog-container.is-loading #catalog-empty {
+    display: none !important;
+}
+#catalog-container.is-loading .catalog-sub {
+    visibility: hidden;
+}
+.catalog-sk-card {
+    border: 1px solid #e5e5ea;
+    border-radius: 12px;
+    padding: 14px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.catalog-sk-top {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+.sk-catalog-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+    flex: 0 0 auto;
+}
+.catalog-sk-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.sk-catalog-name {
+    width: 72%;
+    height: 15px;
+}
+.sk-catalog-bundle {
+    width: 88%;
+    height: 12px;
+}
+.sk-catalog-meta {
+    width: 55%;
+    height: 12px;
+}
+.sk-catalog-meta-short {
+    width: 78%;
+    height: 12px;
+}
+.sk-catalog-btn {
+    width: 100%;
+    height: 34px;
+    border-radius: 8px;
+    margin-top: 2px;
+}
+
 .app-card {
     border: 1px solid #e5e5ea;
     border-radius: 12px;
@@ -595,6 +660,11 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     background: var(--primary-soft);
     color: var(--primary-dark);
     pointer-events: none; /* cả thẻ đã bấm được */
+}
+
+/* SPA: ẩn view không active, giữ DOM trang chủ sống khi xem chi tiết */
+.spa-view-hidden {
+    display: none !important;
 }
 
 /* Màn chi tiết: danh sách bản build */

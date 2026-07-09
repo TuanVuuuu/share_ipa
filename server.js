@@ -298,6 +298,42 @@ app.get('/api/app-info', async (req, res) => {
     }
 });
 
+// 🌐 Endpoint CÔNG KHAI: danh sách build của một app theo bundleId
+// Phục vụ trang /app chia sẻ cho tester (không yêu cầu đăng nhập).
+app.get('/api/app-builds', async (req, res) => {
+    try {
+        const bundleId = (req.query.bundle || '').toString().trim();
+        if (!bundleId) {
+            return res.status(400).json({ success: false, message: 'Thiếu tham số bundle.' });
+        }
+
+        const list = await readCatalog();
+        const builds = list
+            .filter(item => (item.bundleId || item.id) === bundleId)
+            .map(item => ({
+                appName: item.appName,
+                bundleId: item.bundleId,
+                version: item.version,
+                buildNumber: item.buildNumber,
+                icon: item.icon,
+                qr: item.qr,
+                fileSize: item.fileSize,
+                uploadedAt: item.uploadedAt,
+                shareUrl: item.shareUrl,
+                downloadUrl: item.downloadUrl
+            }))
+            .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
+
+        if (!builds.length) {
+            return res.status(404).json({ success: false, message: `Không có bản build nào cho "${bundleId}".` });
+        }
+
+        return res.json({ success: true, bundleId, builds });
+    } catch (err) {
+        res.status(500).json({ success: false, message: `Không tải được danh sách build: ${err.message}` });
+    }
+});
+
 app.get('/api/logs', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');

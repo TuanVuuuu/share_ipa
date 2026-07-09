@@ -117,9 +117,93 @@ function formatDateTime(iso) {
 
 let catalogItems = [];
 
+function getBuildsForBundle(bundleId) {
+    return catalogItems
+        .filter(item => (item.bundleId || item.id) === bundleId)
+        .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
+}
+
+// SPA: giữ trang chủ sống — mở chi tiết app bằng pushState thay vì tải lại trang
+const homeView = document.getElementById('home-view');
+const appDetailView = document.getElementById('app-detail-view');
+let detailViewCtrl = null;
+let homeScrollY = 0;
+const HOME_TITLE = 'Share IPA';
+
+if (homeView && appDetailView && window.CatalogDetail) {
+    detailViewCtrl = CatalogDetail.createDetailView({
+        appDetailZone: document.getElementById('app-detail-zone'),
+        detailPageSub: document.getElementById('detail-page-sub'),
+        detailHeader: document.getElementById('detail-header'),
+        detailIcon: document.getElementById('detail-icon'),
+        detailName: document.getElementById('detail-name'),
+        detailBundle: document.getElementById('detail-bundle'),
+        detailBuilds: document.getElementById('detail-builds'),
+        detailEmpty: document.getElementById('detail-empty'),
+        detailAuth: document.getElementById('detail-auth'),
+        detailShareBtn: document.getElementById('detail-share-btn'),
+        qrModal: document.getElementById('qr-modal'),
+        qrModalClose: document.getElementById('qr-modal-close'),
+        qrModalTitle: document.getElementById('qr-modal-title'),
+        qrModalVersion: document.getElementById('qr-modal-version'),
+        qrModalImage: document.getElementById('qr-modal-image'),
+        qrModalUrl: document.getElementById('qr-modal-url'),
+        qrModalCopy: document.getElementById('qr-modal-copy'),
+        qrModalInstall: document.getElementById('qr-modal-install')
+    });
+
+    document.getElementById('detail-back').addEventListener('click', () => history.back());
+    window.addEventListener('popstate', syncRouteFromUrl);
+}
+
+function showAppDetailPanel(group) {
+    if (!detailViewCtrl) return;
+    homeScrollY = window.scrollY;
+    homeView.classList.add('spa-view-hidden');
+    appDetailView.classList.remove('spa-view-hidden');
+    detailViewCtrl.renderAppDetail(group);
+    window.scrollTo(0, 0);
+}
+
+function hideAppDetailPanel() {
+    if (!homeView || !appDetailView) return;
+    appDetailView.classList.add('spa-view-hidden');
+    homeView.classList.remove('spa-view-hidden');
+    document.title = HOME_TITLE;
+    window.scrollTo(0, homeScrollY);
+}
+
+function syncRouteFromUrl() {
+    const bundleId = new URLSearchParams(window.location.search).get('bundle');
+    if (window.location.pathname === '/app' && bundleId) {
+        const builds = getBuildsForBundle(bundleId);
+        if (builds.length) {
+            showAppDetailPanel({ latest: builds[0], builds });
+            return;
+        }
+    }
+    hideAppDetailPanel();
+}
+
+function navigateToAppDetail(bundleId) {
+    const builds = getBuildsForBundle(bundleId);
+    if (!builds.length) return;
+    history.pushState(
+        { view: 'app-detail', bundleId },
+        '',
+        `/app?bundle=${encodeURIComponent(bundleId)}`
+    );
+    showAppDetailPanel({ latest: builds[0], builds });
+}
+
+function setCatalogLoading(loading) {
+    catalogContainer.classList.toggle('is-loading', loading);
+    if (loading) catalogEmpty.style.display = 'none';
+}
+
 async function loadCatalog() {
     if (!isAuthenticated) return;
-    catalogSub.innerText = 'Đang tải danh mục...';
+    setCatalogLoading(true);
     try {
         const res = await fetch('/api/catalog');
         if (!res.ok) throw new Error('Không tải được danh mục.');
@@ -130,6 +214,7 @@ async function loadCatalog() {
         }
         renderCatalog(data.configured);
     } catch (err) {
+        setCatalogLoading(false);
         catalogSub.innerText = `Lỗi tải danh mục: ${err.message}`;
         catalogList.innerHTML = '';
         catalogEmpty.style.display = 'none';
@@ -155,6 +240,7 @@ function groupByBundle(items) {
 }
 
 function renderCatalog(configured) {
+    setCatalogLoading(false);
     const groups = groupByBundle(catalogItems);
     catalogList.innerHTML = '';
 
@@ -191,9 +277,7 @@ function renderCatalog(configured) {
                 <button type="button" class="btn view-all-btn">Xem tất cả</button>
             </div>
         `;
-        const open = () => {
-            window.location.href = `/app?bundle=${encodeURIComponent(latest.bundleId || group.key)}`;
-        };
+        const open = () => navigateToAppDetail(latest.bundleId || group.key);
         card.addEventListener('click', open);
         catalogList.appendChild(card);
     });
