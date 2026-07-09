@@ -157,6 +157,27 @@ function requireAuth(req, res, next) {
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Tạo block Open Graph + Twitter Card meta tags để Discord/Slack unfurl link đẹp
+function buildOgMeta({ title, description, image, url } = {}) {
+    const esc = (s = '') => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const t = esc(title || 'Share IPA');
+    const d = esc(description || 'Nền tảng chia sẻ và cài đặt ứng dụng iOS nội bộ dễ dàng.');
+    const img = image || `${PUBLIC_BASE_URL}/ic_launcher_web.png`;
+    const u = url || PUBLIC_BASE_URL;
+    return [
+        `<meta property="og:type" content="website">`,
+        `<meta property="og:site_name" content="Share IPA">`,
+        `<meta property="og:url" content="${u}">`,
+        `<meta property="og:title" content="${t}">`,
+        `<meta property="og:description" content="${d}">`,
+        `<meta property="og:image" content="${img}">`,
+        `<meta name="twitter:card" content="summary">`,
+        `<meta name="twitter:title" content="${t}">`,
+        `<meta name="twitter:description" content="${d}">`,
+        `<meta name="twitter:image" content="${img}">`,
+    ].join('\n    ');
+}
+
 // Trả về file HTML kèm chèn version cho asset (thay __V__ bằng ASSET_VERSION) để phá cache
 function sendHtmlWithVersion(res, fileName) {
     const filePath = path.join(__dirname, 'public', fileName);
@@ -172,8 +193,35 @@ function sendHtmlWithVersion(res, fileName) {
     });
 }
 
+// Trả về HTML với version + OG meta tags được inject động
+function sendHtmlWithOg(res, fileName, ogMeta) {
+    const filePath = path.join(__dirname, 'public', fileName);
+    fs.readFile(filePath, 'utf8', (err, html) => {
+        if (err) {
+            res.status(404).send('Not found');
+            return;
+        }
+        let rendered = html.replace(/__V__/g, ASSET_VERSION);
+        if (ogMeta) {
+            rendered = rendered.replace('<!-- __OG_META__ -->', ogMeta);
+        } else {
+            rendered = rendered.replace('<!-- __OG_META__ -->', '');
+        }
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.send(rendered);
+    });
+}
+
 // Các trang HTML được phục vụ động (chèn version) — đặt TRƯỚC express.static để ưu tiên
-app.get('/', (req, res) => sendHtmlWithVersion(res, 'index.html'));
+app.get('/', (req, res) => {
+    const og = buildOgMeta({
+        title: 'Share IPA',
+        description: 'Nền tảng chia sẻ và cài đặt ứng dụng iOS nội bộ. Upload file .ipa và chia sẻ link cài đặt ngay lập tức.',
+        url: `${PUBLIC_BASE_URL}/`,
+    });
+    sendHtmlWithOg(res, 'index.html', og);
+});
 
 // Trang chính và tài nguyên tĩnh mở tự do (không bắt buộc đăng nhập)
 // HTML luôn tải mới, các asset (.js/.css) revalidate để tránh phục vụ bản cũ sau khi deploy
@@ -194,10 +242,58 @@ app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
 app.get('/login', (req, res) => res.redirect('/'));
 
 // Trang cài đặt độc lập cho người quét QR (mở màn hình riêng, chỉ hiện 1 bản build)
-app.get('/install', (req, res) => sendHtmlWithVersion(res, 'install.html'));
+app.get('/install', async (req, res) => {
+    const rawPlist = (req.query.plist || req.query.id || '').toString().trim();
+    let og = buildOgMeta({
+        title: 'Cài đặt ứng dụng — Share IPA',
+        description: 'Quét mã QR hoặc nhấn nút để cài đặt ứng dụng iOS nội bộ.',
+        url: rawPlist ? `${PUBLIC_BASE_URL}/install?plist=${encodeURIComponent(rawPlist)}` : `${PUBLIC_BASE_URL}/install`,
+    });
+    if (rawPlist) {
+        try {
+            const targetId = rawPlist.replace(/\.plist$/i, '');
+            const list = await readCatalog();
+            const record = list.find(item => item.id === targetId);
+            if (record) {
+                og = buildOgMeta({
+                    title: `${record.appName} v${record.version} — Share IPA`,
+                    description: `Cài đặt ${record.appName} phiên bản ${record.version} (build ${record.buildNumber}) · ${record.bundleId}`,
+                    image: record.icon || undefined,
+                    url: `${PUBLIC_BASE_URL}/install?plist=${encodeURIComponent(rawPlist)}`,
+                });
+            }
+        } catch (_) { /* giữ OG mặc định nếu catalog lỗi */ }
+    }
+    sendHtmlWithOg(res, 'install.html', og);
+});
 
 // Trang chi tiết ứng dụng: danh sách tất cả bản build của một app
-app.get('/app', (req, res) => sendHtmlWithVersion(res, 'app-detail.html'));
+app.get('/app', async (req, res) => {
+    const bundleId = (req.query.bundle || '').toString().trim();
+    let og = buildOgMeta({
+        title: 'Chi tiết ứng dụng — Share IPA',
+        description: 'Xem danh sách các bản build của ứng dụng iOS nội bộ.',
+        url: bundleId ? `${PUBLIC_BASE_URL}/app?bundle=${encodeURIComponent(bundleId)}` : `${PUBLIC_BASE_URL}/app`,
+    });
+    if (bundleId) {
+        try {
+            const list = await readCatalog();
+            const builds = list
+                .filter(item => (item.bundleId || item.id) === bundleId)
+                .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
+            if (builds.length > 0) {
+                const latest = builds[0];
+                og = buildOgMeta({
+                    title: `${latest.appName} — Share IPA`,
+                    description: `${latest.appName} · ${bundleId} · Phiên bản mới nhất: ${latest.version} (build ${latest.buildNumber}) · ${builds.length} bản build`,
+                    image: latest.icon || undefined,
+                    url: `${PUBLIC_BASE_URL}/app?bundle=${encodeURIComponent(bundleId)}`,
+                });
+            }
+        } catch (_) { /* giữ OG mặc định nếu catalog lỗi */ }
+    }
+    sendHtmlWithOg(res, 'app-detail.html', og);
+});
 
 // Kiểm tra trạng thái đăng nhập cho frontend
 app.get('/api/auth-status', (req, res) => {
