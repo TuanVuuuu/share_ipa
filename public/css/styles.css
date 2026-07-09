@@ -749,11 +749,14 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 }
 
 .app-detail-page .catalog-back {
-    display: inline-block;
+    display: inline-flex;
     text-decoration: none;
     margin-bottom: 16px;
 }
 .catalog-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     border: 0;
     background: transparent;
     color: var(--primary);
@@ -762,6 +765,9 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     cursor: pointer;
     padding: 0;
     margin-bottom: 16px;
+}
+.catalog-back-icon {
+    flex-shrink: 0;
 }
 .catalog-back:hover { text-decoration: underline; }
 .detail-header {
