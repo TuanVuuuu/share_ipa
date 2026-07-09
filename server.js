@@ -390,6 +390,7 @@ app.get('/api/app-info', async (req, res) => {
                 buildNumber: record.buildNumber,
                 minimumOsVersion: record.minimumOsVersion || null,
                 profileType: record.profileType || null,
+                provisionedDevices: record.provisionedDevices || null,
                 provisionedDevicesCount: record.provisionedDevicesCount ?? null,
                 icon: record.icon,
                 fileSize: record.fileSize,
@@ -422,6 +423,7 @@ app.get('/api/app-builds', async (req, res) => {
                 buildNumber: item.buildNumber,
                 minimumOsVersion: item.minimumOsVersion || null,
                 profileType: item.profileType || null,
+                provisionedDevices: item.provisionedDevices || null,
                 provisionedDevicesCount: item.provisionedDevicesCount ?? null,
                 icon: item.icon,
                 qr: item.qr,
@@ -543,6 +545,9 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                 appName: result.CFBundleDisplayName || result.CFBundleName || 'Ứng dụng iOS',
                 minimumOsVersion: result.MinimumOSVersion || null,
                 profileType: getProfileType(mobileProvision),
+                provisionedDevices: Array.isArray(mobileProvision?.ProvisionedDevices)
+                    ? mobileProvision.ProvisionedDevices
+                    : null,
                 provisionedDevicesCount: Array.isArray(mobileProvision?.ProvisionedDevices)
                     ? mobileProvision.ProvisionedDevices.length
                     : null,
@@ -638,6 +643,7 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                         buildNumber: appInfo.buildNumber,
                         minimumOsVersion: appInfo.minimumOsVersion,
                         profileType: appInfo.profileType,
+                        provisionedDevices: appInfo.provisionedDevices,
                         provisionedDevicesCount: appInfo.provisionedDevicesCount,
                         icon: iconBase64,
                         qr: qrDataUrl,

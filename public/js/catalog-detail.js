@@ -72,6 +72,23 @@
             return tags.join('');
         }
 
+        // Tạo HTML block expand/collapse danh sách UDID thiết bị
+        function buildDevicesBlock(item, extraClass = '') {
+            const devices = Array.isArray(item.provisionedDevices) ? item.provisionedDevices : [];
+            if (!devices.length) return '';
+            const rows = devices.map((udid, i) =>
+                `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid">${escapeHtml(udid)}</code></div>`
+            ).join('');
+            return `
+                <details class="devices-details${extraClass ? ' ' + extraClass : ''}">
+                    <summary class="devices-summary">
+                        <svg class="devices-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                        Xem ${devices.length} thiết bị đã được thêm
+                    </summary>
+                    <div class="devices-list">${rows}</div>
+                </details>`;
+        }
+
         function openQrModal(item) {
             qrModalTitle.innerText = item.appName || 'Ứng dụng';
             qrModalVersion.innerText = `${item.bundleId || ''} • v${item.version} (Build ${item.buildNumber})`;
@@ -79,14 +96,20 @@
             qrModalInstall.href = item.downloadUrl || '#';
 
             // Cập nhật thẻ thông tin bổ sung trong modal
-            const existingMeta = qrModal.querySelector('.qr-modal-meta');
-            if (existingMeta) existingMeta.remove();
+            qrModal.querySelectorAll('.qr-modal-meta, .devices-details').forEach(el => el.remove());
             const metaTags = buildBuildMetaTags(item);
             if (metaTags) {
                 const metaEl = document.createElement('div');
                 metaEl.className = 'qr-modal-meta';
                 metaEl.innerHTML = metaTags;
                 qrModalVersion.insertAdjacentElement('afterend', metaEl);
+            }
+
+            // Block expand/collapse thiết bị (chèn sau metaTags hoặc sau version)
+            const devicesHtml = buildDevicesBlock(item, 'qr-modal-devices');
+            if (devicesHtml) {
+                const anchor = qrModal.querySelector('.qr-modal-meta') || qrModalVersion;
+                anchor.insertAdjacentHTML('afterend', devicesHtml);
             }
 
             qrModalImage.innerHTML = '';
@@ -141,6 +164,7 @@
             detailBuilds.innerHTML = '';
             builds.forEach((build, index) => {
                 const metaTags = buildBuildMetaTags(build);
+                const devicesBlock = buildDevicesBlock(build);
                 const row = document.createElement('div');
                 row.className = 'build-row';
                 row.innerHTML = `
@@ -149,6 +173,7 @@
                         ${index === 0 ? '<span class="build-latest">Mới nhất</span>' : ''}
                         <div class="build-sub">📦 ${escapeHtml(build.fileSize || '--')} • 🕒 ${escapeHtml(formatDateTime(build.uploadedAt))}</div>
                         ${metaTags ? `<div class="build-tags">${metaTags}</div>` : ''}
+                        ${devicesBlock}
                     </div>
                     <div class="build-actions">
                         <button type="button" class="btn secondary qr-btn">Xem QR</button>

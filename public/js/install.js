@@ -67,6 +67,23 @@ async function init() {
                 tagsEl.className = 'build-tags install-tags';
                 tagsEl.innerHTML = tags.join('');
                 installExtra.insertAdjacentElement('afterend', tagsEl);
+
+                // Block expand/collapse danh sách UDID thiết bị
+                const devices = Array.isArray(it.provisionedDevices) ? it.provisionedDevices : [];
+                if (devices.length) {
+                    const rows = devices.map((udid, i) =>
+                        `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid">${udid}</code></div>`
+                    ).join('');
+                    const detailsEl = document.createElement('details');
+                    detailsEl.className = 'devices-details install-devices';
+                    detailsEl.innerHTML = `
+                        <summary class="devices-summary">
+                            <svg class="devices-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                            Xem ${devices.length} thiết bị đã được thêm
+                        </summary>
+                        <div class="devices-list">${rows}</div>`;
+                    tagsEl.insertAdjacentElement('afterend', detailsEl);
+                }
             }
         } else {
             installName.innerText = 'Không tìm thấy thông tin bản build';

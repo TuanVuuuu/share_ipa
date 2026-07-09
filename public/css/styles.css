@@ -946,3 +946,71 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     justify-content: center;
     margin-top: 8px;
 }
+
+/* Block expand/collapse danh sách thiết bị */
+.devices-details {
+    margin-top: 8px;
+    border: 1px solid #e5e5ea;
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 12px;
+}
+.devices-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    cursor: pointer;
+    font-weight: 600;
+    color: #555;
+    list-style: none;
+    user-select: none;
+    background: #f7f7f8;
+}
+.devices-summary::-webkit-details-marker { display: none; }
+.devices-summary:hover { background: #efefef; }
+.devices-chevron {
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+    color: #888;
+}
+.devices-details[open] .devices-chevron {
+    transform: rotate(90deg);
+}
+.devices-list {
+    padding: 6px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #fff;
+}
+.device-udid-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+.device-index {
+    flex-shrink: 0;
+    min-width: 22px;
+    color: #999;
+    font-size: 11px;
+    text-align: right;
+}
+.device-udid {
+    font-family: 'SF Mono', 'Fira Mono', 'Menlo', monospace;
+    font-size: 11px;
+    color: #333;
+    word-break: break-all;
+}
+
+/* Căn giữa khi ở trong modal hoặc trang install */
+.qr-modal-devices,
+.install-devices {
+    width: 100%;
+    text-align: left;
+}
+.install-devices {
+    margin-top: 10px;
+}
