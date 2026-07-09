@@ -11,7 +11,7 @@
 </head>
 <body>
 
-<div class="container app-detail-page" id="app-detail-zone">
+<div class="container app-detail-page is-loading" id="app-detail-zone">
     <a href="/" class="catalog-back" id="detail-back">← Quay lại danh mục</a>
 
     <div class="catalog-head">
@@ -20,15 +20,54 @@
     </div>
     <p class="catalog-sub" id="detail-page-sub">Đang tải...</p>
 
-    <div class="detail-header" id="detail-header" style="display:none;">
-        <img src="" alt="icon" class="detail-icon" id="detail-icon">
-        <div class="detail-header-info">
-            <h3 id="detail-name"></h3>
-            <p id="detail-bundle"></p>
+    <div class="detail-skeleton" id="detail-skeleton" aria-hidden="true" aria-busy="true">
+        <div class="sk sk-line detail-sk-sub"></div>
+        <div class="detail-sk-header">
+            <div class="sk sk-detail-icon"></div>
+            <div class="detail-sk-info">
+                <div class="sk sk-line sk-detail-title"></div>
+                <div class="sk sk-line sk-detail-bundle"></div>
+            </div>
+        </div>
+        <div class="detail-sk-builds">
+            <div class="detail-sk-row">
+                <div class="sk sk-line sk-detail-badge"></div>
+                <div class="sk sk-line sk-detail-meta"></div>
+                <div class="detail-sk-actions">
+                    <div class="sk sk-detail-btn"></div>
+                    <div class="sk sk-detail-btn"></div>
+                </div>
+            </div>
+            <div class="detail-sk-row">
+                <div class="sk sk-line sk-detail-badge"></div>
+                <div class="sk sk-line sk-detail-meta"></div>
+                <div class="detail-sk-actions">
+                    <div class="sk sk-detail-btn"></div>
+                    <div class="sk sk-detail-btn"></div>
+                </div>
+            </div>
+            <div class="detail-sk-row">
+                <div class="sk sk-line sk-detail-badge"></div>
+                <div class="sk sk-line sk-detail-meta"></div>
+                <div class="detail-sk-actions">
+                    <div class="sk sk-detail-btn"></div>
+                    <div class="sk sk-detail-btn"></div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div id="detail-builds" class="detail-builds"></div>
+    <div class="detail-content" id="detail-content">
+        <div class="detail-header" id="detail-header" style="display:none;">
+            <img src="" alt="icon" class="detail-icon" id="detail-icon">
+            <div class="detail-header-info">
+                <h3 id="detail-name"></h3>
+                <p id="detail-bundle"></p>
+            </div>
+        </div>
+
+        <div id="detail-builds" class="detail-builds"></div>
+    </div>
     <div id="detail-empty" class="catalog-empty" style="display:none;">Không tìm thấy ứng dụng trong danh mục.</div>
     <div id="detail-auth" class="catalog-empty" style="display:none;">
         Vui lòng <a href="/">đăng nhập tại trang chủ</a> để xem chi tiết ứng dụng.

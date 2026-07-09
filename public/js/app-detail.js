@@ -1,5 +1,6 @@
 const FALLBACK_ICON = 'https://cdn-icons-png.flaticon.com/512/5115/5115293.png';
 
+const appDetailZone = document.getElementById('app-detail-zone');
 const detailPageSub = document.getElementById('detail-page-sub');
 const detailHeader = document.getElementById('detail-header');
 const detailIcon = document.getElementById('detail-icon');
@@ -92,6 +93,10 @@ async function copyText(text, button) {
 
 detailShareBtn.addEventListener('click', () => copyText(window.location.href, detailShareBtn));
 
+function stopLoading() {
+    appDetailZone.classList.remove('is-loading');
+}
+
 function renderBuilds(builds) {
     detailBuilds.innerHTML = '';
     builds.forEach((build, index) => {
@@ -114,6 +119,7 @@ function renderBuilds(builds) {
 }
 
 function renderAppDetail(group) {
+    stopLoading();
     const { latest, builds } = group;
 
     detailIcon.src = latest.icon || FALLBACK_ICON;
@@ -132,6 +138,7 @@ async function init() {
     const bundleId = (params.get('bundle') || '').trim();
 
     if (!bundleId) {
+        stopLoading();
         detailPageSub.innerText = 'Thiếu thông tin ứng dụng.';
         detailEmpty.style.display = 'block';
         return;
@@ -143,6 +150,7 @@ async function init() {
         const authRes = await fetch('/api/auth-status');
         const authData = await authRes.json();
         if (!authData.authenticated) {
+            stopLoading();
             detailPageSub.style.display = 'none';
             detailAuth.style.display = 'block';
             return;
@@ -157,6 +165,7 @@ async function init() {
             .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
 
         if (!builds.length) {
+            stopLoading();
             detailPageSub.innerText = `Không có bản build nào cho "${bundleId}".`;
             detailEmpty.style.display = 'block';
             return;
@@ -164,6 +173,7 @@ async function init() {
 
         renderAppDetail({ latest: builds[0], builds });
     } catch (err) {
+        stopLoading();
         detailPageSub.innerText = `Lỗi: ${err.message}`;
     }
 }

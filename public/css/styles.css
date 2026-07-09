@@ -602,6 +602,82 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 .app-detail-page {
     min-height: calc(100vh - 48px);
 }
+.app-detail-page.is-loading .detail-content { display: none; }
+.app-detail-page.is-loading .detail-skeleton { display: block; }
+.app-detail-page.is-loading .catalog-sub { visibility: hidden; }
+.app-detail-page.is-loading #detail-share-btn { visibility: hidden; }
+
+.detail-content {
+    animation: install-fade-in 0.3s ease;
+}
+.detail-skeleton {
+    display: none;
+}
+.detail-sk-sub {
+    width: 48%;
+    height: 13px;
+    margin-bottom: 18px;
+}
+.detail-sk-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 16px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #e5e5ea;
+}
+.sk-detail-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 14px;
+    flex-shrink: 0;
+}
+.detail-sk-info {
+    flex: 1;
+    min-width: 0;
+}
+.sk-detail-title {
+    width: 55%;
+    height: 18px;
+    margin-bottom: 10px;
+}
+.sk-detail-bundle {
+    width: 75%;
+    height: 13px;
+}
+.detail-sk-builds {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+.detail-sk-row {
+    border: 1px solid #e5e5ea;
+    border-radius: 12px;
+    padding: 12px 14px;
+}
+.sk-detail-badge {
+    width: 130px;
+    height: 22px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+.sk-detail-meta {
+    width: 62%;
+    height: 12px;
+    margin-bottom: 10px;
+}
+.detail-sk-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+.sk-detail-btn {
+    width: 76px;
+    height: 34px;
+    border-radius: 8px;
+}
+
 .app-detail-page .catalog-back {
     display: inline-block;
     text-decoration: none;
