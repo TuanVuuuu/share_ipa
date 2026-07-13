@@ -493,6 +493,27 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     font-size: 13px;
     color: #86868b;
 }
+.catalog-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+}
+.catalog-section-head {
+    margin-bottom: 12px;
+}
+.catalog-section-title {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 700;
+}
+.catalog-section-count {
+    font-size: 13px;
+    font-weight: 500;
+    color: #86868b;
+}
 .catalog-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -922,6 +943,10 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 .build-tag-ios {
     background: #e8f4fd;
     color: #1a73e8;
+}
+.build-tag-android {
+    background: #e8f5e9;
+    color: #2e7d32;
 }
 .build-tag-profile {
     background: #f0ebff;

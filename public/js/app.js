@@ -127,9 +127,10 @@ function formatDateTime(iso) {
 
 let catalogItems = [];
 
-function getBuildsForBundle(bundleId) {
+function getBuildsForBundle(bundleId, platform) {
     return catalogItems
         .filter(item => (item.bundleId || item.id) === bundleId)
+        .filter(item => !platform || (item.platform || 'ios') === platform)
         .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
 }
 
@@ -183,10 +184,38 @@ function hideAppDetailPanel() {
     window.scrollTo(0, homeScrollY);
 }
 
+function parseAppDetailRoute() {
+    const match = window.location.pathname.match(/^\/(ios|android)\/app\/?$/);
+    if (!match) return null;
+    const params = new URLSearchParams(window.location.search);
+    const bundleId = (params.get('bundle') || '').trim();
+    if (!bundleId) return null;
+    return { platform: match[1], bundleId };
+}
+
+function buildAppDetailPath(platform, bundleId) {
+    const p = platform === 'android' ? 'android' : 'ios';
+    return `/${p}/app?bundle=${encodeURIComponent(bundleId)}`;
+}
+
 function syncRouteFromUrl() {
-    const bundleId = new URLSearchParams(window.location.search).get('bundle');
-    if (window.location.pathname === '/app' && bundleId) {
-        const builds = getBuildsForBundle(bundleId);
+    const route = parseAppDetailRoute();
+    // Tương thích cũ: /app?bundle=...&platform=...
+    if (!route && window.location.pathname === '/app') {
+        const params = new URLSearchParams(window.location.search);
+        const bundleId = (params.get('bundle') || '').trim();
+        if (bundleId) {
+            const platform = params.get('platform') === 'android' ? 'android' : 'ios';
+            history.replaceState({ view: 'app-detail', bundleId, platform }, '', buildAppDetailPath(platform, bundleId));
+            const builds = getBuildsForBundle(bundleId, platform);
+            if (builds.length) {
+                showAppDetailPanel({ latest: builds[0], builds });
+                return;
+            }
+        }
+    }
+    if (route) {
+        const builds = getBuildsForBundle(route.bundleId, route.platform);
         if (builds.length) {
             showAppDetailPanel({ latest: builds[0], builds });
             return;
@@ -195,13 +224,14 @@ function syncRouteFromUrl() {
     hideAppDetailPanel();
 }
 
-function navigateToAppDetail(bundleId) {
-    const builds = getBuildsForBundle(bundleId);
+function navigateToAppDetail(bundleId, platform) {
+    const builds = getBuildsForBundle(bundleId, platform);
     if (!builds.length) return;
+    const p = platform === 'android' ? 'android' : 'ios';
     history.pushState(
-        { view: 'app-detail', bundleId },
+        { view: 'app-detail', bundleId, platform: p },
         '',
-        `/app?bundle=${encodeURIComponent(bundleId)}`
+        buildAppDetailPath(p, bundleId)
     );
     showAppDetailPanel({ latest: builds[0], builds });
 }
@@ -231,12 +261,13 @@ async function loadCatalog() {
     }
 }
 
-// Gom nhóm theo bundleId: mỗi nhóm là 1 "thư mục app" kèm toàn bộ bản build
+// Gom nhóm theo platform + bundleId: mỗi nhóm là 1 "thư mục app" kèm toàn bộ bản build
 function groupByBundle(items) {
     const map = new Map();
     items.forEach(item => {
-        const key = item.bundleId || item.id;
-        if (!map.has(key)) map.set(key, { key, builds: [] });
+        const platform = item.platform || 'ios';
+        const key = `${platform}:${item.bundleId || item.id}`;
+        if (!map.has(key)) map.set(key, { key, platform, builds: [] });
         map.get(key).builds.push(item);
     });
 
@@ -249,14 +280,66 @@ function groupByBundle(items) {
     return groups.sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
 }
 
+function createAppCard(group) {
+    const { latest, count, platform } = group;
+    const platformLabel = platform === 'android' ? 'Android' : 'iOS';
+    const platformClass = platform === 'android' ? 'build-tag-android' : 'build-tag-ios';
+    const card = document.createElement('div');
+    card.className = 'app-card folder-card';
+    card.innerHTML = `
+        <div class="app-card-top">
+            <img src="${escapeHtml(latest.icon || FALLBACK_ICON)}" alt="icon" onerror="this.src='${FALLBACK_ICON}'">
+            <div class="app-card-info">
+                <h4>${escapeHtml(latest.appName)}</h4>
+                <p class="app-card-bundle">${escapeHtml(latest.bundleId)}</p>
+            </div>
+        </div>
+        <div class="app-card-meta">
+            <span class="build-tag ${platformClass}">${platformLabel}</span>
+            <span class="badge">📁 ${count} bản build</span>
+            <span>🆕 v${escapeHtml(latest.version)} (Build ${escapeHtml(latest.buildNumber)})</span>
+            <span>🕒 ${escapeHtml(formatDateTime(latest.uploadedAt))}</span>
+        </div>
+        <div class="app-card-actions">
+            <button type="button" class="btn view-all-btn">Xem tất cả</button>
+        </div>
+    `;
+    card.addEventListener('click', () => navigateToAppDetail(latest.bundleId, platform));
+    return card;
+}
+
+function appendCatalogSection(container, title, platform, groups) {
+    if (!groups.length) return;
+    const section = document.createElement('section');
+    section.className = `catalog-section catalog-section-${platform}`;
+    section.innerHTML = `
+        <div class="catalog-section-head">
+            <h3 class="catalog-section-title">
+                <span class="build-tag ${platform === 'android' ? 'build-tag-android' : 'build-tag-ios'}">${title}</span>
+                <span class="catalog-section-count">${groups.length} ứng dụng</span>
+            </h3>
+        </div>
+    `;
+    const grid = document.createElement('div');
+    grid.className = 'catalog-grid';
+    groups.forEach((group) => grid.appendChild(createAppCard(group)));
+    section.appendChild(grid);
+    container.appendChild(section);
+}
+
 function renderCatalog(configured) {
     setCatalogLoading(false);
     const groups = groupByBundle(catalogItems);
+    const iosGroups = groups.filter((g) => g.platform !== 'android');
+    const androidGroups = groups.filter((g) => g.platform === 'android');
     catalogList.innerHTML = '';
 
     if (configured !== false) {
-        catalogSub.innerText = groups.length
-            ? `Có ${groups.length} ứng dụng trong danh mục.`
+        const parts = [];
+        if (iosGroups.length) parts.push(`${iosGroups.length} iOS`);
+        if (androidGroups.length) parts.push(`${androidGroups.length} Android`);
+        catalogSub.innerText = parts.length
+            ? `Có ${parts.join(' · ')} trong danh mục.`
             : 'Danh sách các ứng dụng đã xử lý và lưu trữ.';
     }
 
@@ -266,31 +349,8 @@ function renderCatalog(configured) {
     }
     catalogEmpty.style.display = 'none';
 
-    groups.forEach((group) => {
-        const { latest, count } = group;
-        const card = document.createElement('div');
-        card.className = 'app-card folder-card';
-        card.innerHTML = `
-            <div class="app-card-top">
-                <img src="${escapeHtml(latest.icon || FALLBACK_ICON)}" alt="icon" onerror="this.src='${FALLBACK_ICON}'">
-                <div class="app-card-info">
-                    <h4>${escapeHtml(latest.appName)}</h4>
-                    <p class="app-card-bundle">${escapeHtml(latest.bundleId)}</p>
-                </div>
-            </div>
-            <div class="app-card-meta">
-                <span class="badge">📁 ${count} bản build</span>
-                <span>🆕 v${escapeHtml(latest.version)} (Build ${escapeHtml(latest.buildNumber)})</span>
-                <span>🕒 ${escapeHtml(formatDateTime(latest.uploadedAt))}</span>
-            </div>
-            <div class="app-card-actions">
-                <button type="button" class="btn view-all-btn">Xem tất cả</button>
-            </div>
-        `;
-        const open = () => navigateToAppDetail(latest.bundleId || group.key);
-        card.addEventListener('click', open);
-        catalogList.appendChild(card);
-    });
+    appendCatalogSection(catalogList, 'iOS', 'ios', iosGroups);
+    appendCatalogSection(catalogList, 'Android', 'android', androidGroups);
 }
 
 catalogRefreshBtn.addEventListener('click', loadCatalog);
@@ -367,8 +427,8 @@ function handleFile(file) {
         alert('Vui lòng đăng nhập trước khi tải lên tệp tin.');
         return;
     }
-    if (!file.name.endsWith('.ipa')) {
-        alert('Vui lòng chỉ chọn tệp tin định dạng .ipa');
+    if (!file.name.endsWith('.ipa') && !file.name.endsWith('.apk')) {
+        alert('Vui lòng chỉ chọn tệp tin định dạng .ipa hoặc .apk');
         return;
     }
     uploadSecure(file);
@@ -568,13 +628,13 @@ function _refreshProgress(fileSize, concurrency) {
     setActivity(`Đang truyền ${concurrency} luồng song song • ${formatBytesClient(totalSent)} / ${formatBytesClient(fileSize)} • ${formatSpeed(speed)}`, 'active');
 }
 
-// Polling kết quả xử lý IPA sau khi server nhận jobId
+// Polling kết quả xử lý file sau khi server nhận jobId
 async function _pollJobResult(jobId) {
     let p = 92;
     clearInterval(progressTimer);
     progressTimer = setInterval(() => {
         p = Math.min(p + 0.3, 98);
-        updateProgress(p, 'Máy chủ đang xử lý IPA và tạo liên kết chia sẻ...');
+        updateProgress(p, 'Máy chủ đang xử lý file và tạo liên kết chia sẻ...');
     }, 400);
 
     const pollStart = Date.now();
@@ -591,7 +651,7 @@ async function _pollJobResult(jobId) {
 
         if (!statusData) continue;
         if (statusData.status === 'done' && statusData.result) return statusData.result;
-        if (statusData.status === 'error') throw new Error(statusData.message || 'Máy chủ xử lý IPA thất bại.');
+        if (statusData.status === 'error') throw new Error(statusData.message || 'Máy chủ xử lý file thất bại.');
     }
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -717,7 +777,7 @@ async function uploadViaR2(file, startedAt, { r2UploadId, objectKey }) {
         await Promise.all(workers);
 
         clearStallWatch();
-        updateProgress(92, 'Upload R2 hoàn tất. Máy chủ đang ghép và phân tích IPA...');
+        updateProgress(92, 'Upload R2 hoàn tất. Máy chủ đang ghép và phân tích file...');
         setActivity('R2 đã nhận đủ dữ liệu — máy chủ đang hoàn tất...', 'active');
 
         // Finalize: gửi danh sách ETags để R2 ghép + server parse IPA ở nền
@@ -839,7 +899,7 @@ async function uploadViaChunks(file, startedAt) {
         await Promise.all(workers);
 
         clearStallWatch();
-        updateProgress(92, 'Đã tải xong. Máy chủ đang ghép chunk và phân tích IPA...');
+        updateProgress(92, 'Đã tải xong. Máy chủ đang ghép chunk và phân tích file...');
         setActivity('Máy chủ đang xử lý...', 'active');
 
         const finCtrl = new AbortController();

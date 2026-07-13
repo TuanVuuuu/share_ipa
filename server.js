@@ -17,7 +17,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '9';
+const ASSET_VERSION = process.env.ASSET_VERSION || '11';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -125,7 +125,7 @@ const storage = multer.diskStorage({
     destination: (req, file, cb) => { cb(null, UPLOADS_MAIN_DIR); },
     filename: (req, file, cb) => { cb(null, `app_${Date.now()}_${file.originalname}`); }
 });
-const upload = multer({ storage: storage, limits: { fileSize: 200 * 1024 * 1024 } }); // Hạn mức hẳn 200MB
+const upload = multer({ storage: storage, limits: { fileSize: 500 * 1024 * 1024 } }); // Hạn mức 500MB
 const chunkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
 function parseCookies(cookieHeader = '') {
@@ -161,7 +161,7 @@ app.use(express.urlencoded({ extended: false }));
 function buildOgMeta({ title, description, image, url } = {}) {
     const esc = (s = '') => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const t = esc(title || 'Share IPA');
-    const d = esc(description || 'Nền tảng chia sẻ và cài đặt ứng dụng iOS nội bộ dễ dàng.');
+    const d = esc(description || 'Nền tảng chia sẻ và cài đặt ứng dụng iOS/Android nội bộ dễ dàng.');
     const img = image || `${PUBLIC_BASE_URL}/ic_launcher_web.png`;
     const u = url || PUBLIC_BASE_URL;
     return [
@@ -217,7 +217,7 @@ function sendHtmlWithOg(res, fileName, ogMeta) {
 app.get('/', (req, res) => {
     const og = buildOgMeta({
         title: 'Share IPA',
-        description: 'Nền tảng chia sẻ và cài đặt ứng dụng iOS nội bộ. Upload file .ipa và chia sẻ link cài đặt ngay lập tức.',
+        description: 'Nền tảng chia sẻ và cài đặt ứng dụng iOS/Android nội bộ. Upload file .ipa hoặc .apk và chia sẻ link cài đặt ngay lập tức.',
         url: `${PUBLIC_BASE_URL}/`,
     });
     sendHtmlWithOg(res, 'index.html', og);
@@ -235,7 +235,14 @@ app.use(express.static('public', {
         }
     }
 }));
-app.use('/uploads', express.static(UPLOADS_MAIN_DIR));
+app.use('/uploads', express.static(UPLOADS_MAIN_DIR, {
+    setHeaders: (res, filePath) => {
+        if (filePath.toLowerCase().endsWith('.apk')) {
+            res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+            res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+        }
+    }
+}));
 app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
 
 // Đường dẫn /login cũ giờ trỏ thẳng về trang chính (ô đăng nhập nằm ngay trong trang)
@@ -246,8 +253,8 @@ app.get('/install', async (req, res) => {
     const rawPlist = (req.query.plist || req.query.id || '').toString().trim();
     let og = buildOgMeta({
         title: 'Cài đặt ứng dụng — Share IPA',
-        description: 'Quét mã QR hoặc nhấn nút để cài đặt ứng dụng iOS nội bộ.',
-        url: rawPlist ? `${PUBLIC_BASE_URL}/install?plist=${encodeURIComponent(rawPlist)}` : `${PUBLIC_BASE_URL}/install`,
+        description: 'Quét mã QR hoặc nhấn nút để cài đặt ứng dụng iOS/Android nội bộ.',
+        url: rawPlist ? `${PUBLIC_BASE_URL}/install?${rawPlist.endsWith('.plist') ? 'plist' : 'id'}=${encodeURIComponent(rawPlist)}` : `${PUBLIC_BASE_URL}/install`,
     });
     if (rawPlist) {
         try {
@@ -255,11 +262,15 @@ app.get('/install', async (req, res) => {
             const list = await readCatalog();
             const record = list.find(item => item.id === targetId);
             if (record) {
+                const platformLabel = record.platform === 'android' ? 'Android' : 'iOS';
+                const installQuery = record.platform === 'android'
+                    ? `id=${encodeURIComponent(record.id)}`
+                    : `plist=${encodeURIComponent(rawPlist)}`;
                 og = buildOgMeta({
                     title: `${record.appName} v${record.version} — Share IPA`,
-                    description: `Cài đặt ${record.appName} phiên bản ${record.version} (build ${record.buildNumber}) · ${record.bundleId}`,
+                    description: `Cài đặt ${record.appName} (${platformLabel}) phiên bản ${record.version} (build ${record.buildNumber}) · ${record.bundleId}`,
                     image: record.icon || undefined,
-                    url: `${PUBLIC_BASE_URL}/install?plist=${encodeURIComponent(rawPlist)}`,
+                    url: `${PUBLIC_BASE_URL}/install?${installQuery}`,
                 });
             }
         } catch (_) { /* giữ OG mặc định nếu catalog lỗi */ }
@@ -267,32 +278,54 @@ app.get('/install', async (req, res) => {
     sendHtmlWithOg(res, 'install.html', og);
 });
 
-// Trang chi tiết ứng dụng: danh sách tất cả bản build của một app
-app.get('/app', async (req, res) => {
+// Trang chi tiết ứng dụng theo platform: /ios/app?bundle=... | /android/app?bundle=...
+function buildAppDetailPath(platform, bundleId) {
+    const p = platform === 'android' ? 'android' : 'ios';
+    return bundleId
+        ? `/${p}/app?bundle=${encodeURIComponent(bundleId)}`
+        : `/${p}/app`;
+}
+
+async function serveAppDetailPage(req, res, platform) {
     const bundleId = (req.query.bundle || '').toString().trim();
+    const platformLabel = platform === 'android' ? 'Android' : 'iOS';
+    const appUrl = `${PUBLIC_BASE_URL}${buildAppDetailPath(platform, bundleId)}`;
     let og = buildOgMeta({
-        title: 'Chi tiết ứng dụng — Share IPA',
-        description: 'Xem danh sách các bản build của ứng dụng iOS nội bộ.',
-        url: bundleId ? `${PUBLIC_BASE_URL}/app?bundle=${encodeURIComponent(bundleId)}` : `${PUBLIC_BASE_URL}/app`,
+        title: `Chi tiết ứng dụng ${platformLabel} — Share IPA`,
+        description: `Xem danh sách các bản build ${platformLabel} nội bộ.`,
+        url: appUrl,
     });
     if (bundleId) {
         try {
             const list = await readCatalog();
             const builds = list
                 .filter(item => (item.bundleId || item.id) === bundleId)
+                .filter(item => (item.platform || 'ios') === platform)
                 .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
             if (builds.length > 0) {
                 const latest = builds[0];
                 og = buildOgMeta({
-                    title: `${latest.appName} — Share IPA`,
+                    title: `${latest.appName} (${platformLabel}) — Share IPA`,
                     description: `${latest.appName} · ${bundleId} · Phiên bản mới nhất: ${latest.version} (build ${latest.buildNumber}) · ${builds.length} bản build`,
                     image: latest.icon || undefined,
-                    url: `${PUBLIC_BASE_URL}/app?bundle=${encodeURIComponent(bundleId)}`,
+                    url: appUrl,
                 });
             }
         } catch (_) { /* giữ OG mặc định nếu catalog lỗi */ }
     }
     sendHtmlWithOg(res, 'app-detail.html', og);
+}
+
+app.get('/ios/app', (req, res) => serveAppDetailPage(req, res, 'ios'));
+app.get('/android/app', (req, res) => serveAppDetailPage(req, res, 'android'));
+
+// Tương thích ngược: /app?bundle=...&platform=... → /ios/app hoặc /android/app
+app.get('/app', (req, res) => {
+    const bundleId = (req.query.bundle || '').toString().trim();
+    const platform = (req.query.platform || '').toString().trim().toLowerCase() === 'android'
+        ? 'android'
+        : 'ios';
+    res.redirect(301, buildAppDetailPath(platform, bundleId));
 });
 
 // Kiểm tra trạng thái đăng nhập cho frontend
@@ -416,8 +449,9 @@ async function appendToCatalog(record) {
     // Per-app limit: giữ tối đa 10 build/app trong R2 — xóa bản cũ nhất trước khi thêm mới
     if (record.r2ObjectKey && record.bundleId) {
         const MAX_PER_APP = 10;
+        const recordPlatform = record.platform || 'ios';
         const appBuilds = list
-            .filter(item => item.bundleId === record.bundleId && item.r2ObjectKey)
+            .filter(item => item.bundleId === record.bundleId && item.r2ObjectKey && (item.platform || 'ios') === recordPlatform)
             .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
 
         if (appBuilds.length >= MAX_PER_APP) {
@@ -482,6 +516,7 @@ app.get('/api/app-info', async (req, res) => {
             item: {
                 appName: record.appName,
                 bundleId: record.bundleId,
+                platform: record.platform || 'ios',
                 version: record.version,
                 buildNumber: record.buildNumber,
                 minimumOsVersion: record.minimumOsVersion || null,
@@ -500,11 +535,12 @@ app.get('/api/app-info', async (req, res) => {
     }
 });
 
-// 🌐 Endpoint CÔNG KHAI: danh sách build của một app theo bundleId
-// Phục vụ trang /app chia sẻ cho tester (không yêu cầu đăng nhập).
+// 🌐 Endpoint CÔNG KHAI: danh sách build của một app theo bundleId (+ platform)
+// Phục vụ trang /ios/app và /android/app chia sẻ cho tester (không yêu cầu đăng nhập).
 app.get('/api/app-builds', async (req, res) => {
     try {
         const bundleId = (req.query.bundle || '').toString().trim();
+        const platformFilter = (req.query.platform || '').toString().trim().toLowerCase();
         if (!bundleId) {
             return res.status(400).json({ success: false, message: 'Thiếu tham số bundle.' });
         }
@@ -512,9 +548,11 @@ app.get('/api/app-builds', async (req, res) => {
         const list = await readCatalog();
         const builds = list
             .filter(item => (item.bundleId || item.id) === bundleId)
+            .filter(item => !platformFilter || (item.platform || 'ios') === platformFilter)
             .map(item => ({
                 appName: item.appName,
                 bundleId: item.bundleId,
+                platform: item.platform || 'ios',
                 version: item.version,
                 buildNumber: item.buildNumber,
                 minimumOsVersion: item.minimumOsVersion || null,
@@ -534,7 +572,7 @@ app.get('/api/app-builds', async (req, res) => {
             return res.status(404).json({ success: false, message: `Không có bản build nào cho "${bundleId}".` });
         }
 
-        return res.json({ success: true, bundleId, builds });
+        return res.json({ success: true, bundleId, platform: platformFilter || null, builds });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh sách build: ${err.message}` });
     }
@@ -618,57 +656,103 @@ function getProfileType(mobileProvision) {
     return allowGetTask ? 'Development' : 'App Store';
 }
 
-// 🧠 HÀM DÙNG CHUNG: bóc tách IPA đã nằm sẵn trên đĩa -> tạo link -> trả phản hồi -> lưu trữ ở nền.
+function detectPlatform(filename) {
+    return path.extname(filename || '').toLowerCase() === '.apk' ? 'android' : 'ios';
+}
+
+function resolveApkAppName(result) {
+    const label = result?.application?.label ?? result?.['application-label'];
+    if (typeof label === 'string' && label.trim()) return label.trim();
+    if (label && typeof label === 'object') {
+        const candidate = label[''] || label.en || label['en-US']
+            || Object.values(label).find((v) => typeof v === 'string' && v.trim());
+        if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+    }
+    return null;
+}
+
+function mapParsedAppInfo(result, platform) {
+    if (platform === 'android') {
+        const minSdk = result.usesSdk?.minSdkVersion ?? result.minSdkVersion ?? null;
+        return {
+            platform: 'android',
+            bundleId: result.package || 'com.unknown.app',
+            version: String(result.versionName ?? '1.0.0'),
+            buildNumber: String(result.versionCode ?? '1'),
+            appName: resolveApkAppName(result) || 'Ứng dụng Android',
+            minimumOsVersion: minSdk != null ? String(minSdk) : null,
+            profileType: null,
+            provisionedDevices: null,
+            provisionedDevicesCount: null,
+        };
+    }
+
+    const mobileProvision = result.mobileProvision || null;
+    return {
+        platform: 'ios',
+        bundleId: result.CFBundleIdentifier || 'com.unknown.app',
+        version: result.CFBundleShortVersionString || '1.0.0',
+        buildNumber: result.CFBundleVersion || '1',
+        appName: result.CFBundleDisplayName || result.CFBundleName || 'Ứng dụng iOS',
+        minimumOsVersion: result.MinimumOSVersion || null,
+        profileType: getProfileType(mobileProvision),
+        provisionedDevices: Array.isArray(mobileProvision?.ProvisionedDevices)
+            ? mobileProvision.ProvisionedDevices
+            : null,
+        provisionedDevicesCount: Array.isArray(mobileProvision?.ProvisionedDevices)
+            ? mobileProvision.ProvisionedDevices.length
+            : null,
+    };
+}
+
+// 🧠 HÀM DÙNG CHUNG: bóc tách IPA/APK đã nằm sẵn trên đĩa -> tạo link -> trả phản hồi -> lưu trữ ở nền.
 // Dùng cho cả upload 1 lần (upload-secure), chunk cũ (upload-finalize), lẫn R2 (r2-finalize).
-// r2ObjectKey: nếu có, IPA đang nằm trên R2 → dùng URL R2 trong plist, bỏ qua local archive.
+// r2ObjectKey: nếu có, file đang nằm trên R2 → dùng URL R2, bỏ qua local archive.
 async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes, r2ObjectKey = null }) {
     const startTime = performance.now();
     const formattedTotalSize = formatBytes(fileSizeBytes);
+    const platform = detectPlatform(finalFilename);
+    const packageLabel = platform === 'android' ? 'APK' : 'IPA';
 
     try {
         await logRealtime(`📥 Đã nhận và lưu kho tệp tin (${formattedTotalSize}) thành công vào ổ đĩa Mac!`, 'success');
-        await logRealtime(`⚡ Bắt đầu bóc tách Metadata IPA bằng AppInfoParser...`, 'info');
+        await logRealtime(`⚡ Bắt đầu bóc tách Metadata ${packageLabel} bằng AppInfoParser...`, 'info');
 
         const parser = new AppInfoParser(finalPath);
 
         try {
             const result = await parser.parse();
-            const mobileProvision = result.mobileProvision || null;
-            const appInfo = {
-                bundleId: result.CFBundleIdentifier || 'com.unknown.app',
-                version: result.CFBundleShortVersionString || '1.0.0',
-                buildNumber: result.CFBundleVersion || '1',
-                appName: result.CFBundleDisplayName || result.CFBundleName || 'Ứng dụng iOS',
-                minimumOsVersion: result.MinimumOSVersion || null,
-                profileType: getProfileType(mobileProvision),
-                provisionedDevices: Array.isArray(mobileProvision?.ProvisionedDevices)
-                    ? mobileProvision.ProvisionedDevices
-                    : null,
-                provisionedDevicesCount: Array.isArray(mobileProvision?.ProvisionedDevices)
-                    ? mobileProvision.ProvisionedDevices.length
-                    : null,
-            };
-
+            const appInfo = mapParsedAppInfo(result, platform);
             const iconBase64 = result.icon || 'https://cdn-icons-png.flaticon.com/512/5115/5115293.png';
             const totalProcessTime = ((performance.now() - startTime) / 1000).toFixed(2);
 
-            await logRealtime(`✅ Phân tích cấu trúc thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} trong ${totalProcessTime} giây`, 'success');
+            await logRealtime(`✅ Phân tích cấu trúc thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} (${platform}) trong ${totalProcessTime} giây`, 'success');
 
-            // URL công khai của file IPA: R2 (nếu upload qua R2) hoặc local (legacy)
-            const ipaPublicUrl = r2ObjectKey
+            // URL công khai của file: R2 (nếu upload qua R2) hoặc local (legacy)
+            const filePublicUrl = r2ObjectKey
                 ? `${process.env.R2_PUBLIC_URL}/${r2ObjectKey}`
                 : `${PUBLIC_BASE_URL}/uploads/${finalFilename}`;
 
-            const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
+            let downloadUrl;
+            let shareUrl;
+
+            if (platform === 'android') {
+                // Android: tải thẳng APK — không cần plist / itms-services
+                downloadUrl = filePublicUrl;
+                shareUrl = `${PUBLIC_BASE_URL}/install?id=${encodeURIComponent(finalFilename)}`;
+            } else {
+                const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${ipaPublicUrl}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
+<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${filePublicUrl}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${appInfo.bundleId}</string><key>bundle-version</key><string>${appInfo.version}</string><key>kind</key><string>software</string><key>title</key><string>${appInfo.appName}</string></dict></dict></array></dict></plist>`;
 
-            const plistFilename = `${finalFilename}.plist`;
-            await fs.promises.writeFile(path.join(UPLOADS_MAIN_DIR, plistFilename), plistContent);
+                const plistFilename = `${finalFilename}.plist`;
+                await fs.promises.writeFile(path.join(UPLOADS_MAIN_DIR, plistFilename), plistContent);
 
-            const manifestUrl = `${PUBLIC_BASE_URL}/uploads/${plistFilename}`;
-            const downloadUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
-            const shareUrl = `${PUBLIC_BASE_URL}/install?plist=${plistFilename}`;
+                const manifestUrl = `${PUBLIC_BASE_URL}/uploads/${plistFilename}`;
+                downloadUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
+                shareUrl = `${PUBLIC_BASE_URL}/install?plist=${plistFilename}`;
+            }
+
             const uploadedAt = new Date().toISOString();
 
             await logRealtime('🎉 Đã tạo xong link cài đặt! Đang hoàn tất lưu trữ ở chế độ nền...', 'success');
@@ -703,21 +787,22 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                         };
                         await fs.promises.writeFile(path.join(targetAppFolder, `${finalFilename}.json`), JSON.stringify(metadataInfo, null, 4));
 
+                        const archiveExt = platform === 'android' ? '.apk' : '.ipa';
                         const currentFiles = fs.readdirSync(targetAppFolder);
-                        const ipaFiles = currentFiles
-                            .filter(f => f.endsWith('.ipa'))
+                        const packageFiles = currentFiles
+                            .filter(f => f.endsWith(archiveExt))
                             .map(f => {
                                 const filePath = path.join(targetAppFolder, f);
                                 return { name: f, path: filePath, ctime: fs.statSync(filePath).ctimeMs };
                             })
                             .sort((a, b) => a.ctime - b.ctime);
 
-                        if (ipaFiles.length > 10) {
-                            const deleteCount = ipaFiles.length - 10;
+                        if (packageFiles.length > 10) {
+                            const deleteCount = packageFiles.length - 10;
                             await logRealtime(`⚠️ Vượt quá 10 bản build. Tiến hành tự động xóa bỏ ${deleteCount} tệp cũ...`, 'info');
                             for (let k = 0; k < deleteCount; k++) {
-                                if (fs.existsSync(ipaFiles[k].path)) fs.unlinkSync(ipaFiles[k].path);
-                                if (fs.existsSync(ipaFiles[k].path + '.json')) fs.unlinkSync(ipaFiles[k].path + '.json');
+                                if (fs.existsSync(packageFiles[k].path)) fs.unlinkSync(packageFiles[k].path);
+                                if (fs.existsSync(packageFiles[k].path + '.json')) fs.unlinkSync(packageFiles[k].path + '.json');
                             }
                         }
                     }
@@ -735,6 +820,7 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                         id: finalFilename,
                         appName: appInfo.appName,
                         bundleId: appInfo.bundleId,
+                        platform: appInfo.platform,
                         version: appInfo.version,
                         buildNumber: appInfo.buildNumber,
                         minimumOsVersion: appInfo.minimumOsVersion,
@@ -771,8 +857,8 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
             })();
             return;
         } catch (parserError) {
-            logToUI(`❌ Trích xuất thông tin IPA thất bại: ${parserError.message}`, 'error');
-            return res.status(500).json({ success: false, message: `Lỗi bóc tách cấu trúc file IPA: ${parserError.message}` });
+            logToUI(`❌ Trích xuất thông tin ${packageLabel} thất bại: ${parserError.message}`, 'error');
+            return res.status(500).json({ success: false, message: `Lỗi bóc tách cấu trúc file ${packageLabel}: ${parserError.message}` });
         }
     } catch (error) {
         logToUI(`❌ Hệ thống gặp lỗi xử lý: ${error.message}`, 'error');
@@ -783,7 +869,7 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
 // Upload 1 lần (cũ) vẫn giữ lại để tương thích ngược.
 app.post('/api/upload-secure', receiveUpload, async (req, res) => {
     if (!req.file) {
-        return res.status(400).json({ success: false, message: 'Không tìm thấy tệp tin IPA.' });
+        return res.status(400).json({ success: false, message: 'Không tìm thấy tệp tin IPA/APK.' });
     }
     return processUploadedIpa(res, {
         finalFilename: req.file.filename,
@@ -877,7 +963,7 @@ app.post('/api/upload-finalize', async (req, res) => {
                 const finalFilename = `app_${Date.now()}_${safeOriginalName}`;
                 const finalPath = path.join(UPLOADS_MAIN_DIR, finalFilename);
 
-                await logRealtime(`🧵 Bắt đầu ghép ${total} chunk thành tệp IPA hoàn chỉnh...`, 'info');
+                await logRealtime(`🧵 Bắt đầu ghép ${total} chunk thành tệp hoàn chỉnh...`, 'info');
 
                 for (let i = 0; i < total; i++) {
                     const chunkPath = path.join(CHUNKS_DIR, `upload_${uploadId}_${i}`);
@@ -888,7 +974,7 @@ app.post('/api/upload-finalize', async (req, res) => {
 
                 const fileStat = await fs.promises.stat(finalPath);
                 const expectedSize = Number(totalSize) || fileStat.size;
-                await logRealtime(`🧵 Ghép chunk hoàn tất (${formatBytes(fileStat.size)}). Chuyển sang xử lý IPA...`, 'success');
+                await logRealtime(`🧵 Ghép chunk hoàn tất (${formatBytes(fileStat.size)}). Chuyển sang xử lý file...`, 'success');
 
                 // processUploadedIpa gọi res.json() để trả kết quả — ta dùng mock res để bắt kết quả
                 const mockRes = {
@@ -903,9 +989,9 @@ app.post('/api/upload-finalize', async (req, res) => {
                 if (mockRes._statusCode >= 200 && mockRes._statusCode < 300 && mockRes._body?.success) {
                     jobStore.set(jobId, { status: 'done', result: mockRes._body, createdAt: Date.now() });
                 } else {
-                    const errMsg = mockRes._body?.message || 'Lỗi không xác định khi xử lý IPA.';
+                    const errMsg = mockRes._body?.message || 'Lỗi không xác định khi xử lý file.';
                     jobStore.set(jobId, { status: 'error', error: errMsg, createdAt: Date.now() });
-                    logToUI(`❌ Xử lý IPA thất bại (job ${jobId}): ${errMsg}`, 'error');
+                    logToUI(`❌ Xử lý file thất bại (job ${jobId}): ${errMsg}`, 'error');
                 }
             } catch (err) {
                 jobStore.set(jobId, { status: 'error', error: err.message, createdAt: Date.now() });
@@ -932,10 +1018,14 @@ app.post('/api/r2-start', async (req, res) => {
         const { originalName = 'app.ipa' } = req.body;
         const safeName = path.basename(originalName).replace(/[^\w.\-]/g, '_');
         const objectKey = `uploads/app_${Date.now()}_${safeName}`;
+        const contentType = safeName.toLowerCase().endsWith('.apk')
+            ? 'application/vnd.android.package-archive'
+            : 'application/octet-stream';
 
         const { UploadId } = await r2Client.send(new _R2Cmd.CreateMultipartUploadCommand({
             Bucket: process.env.R2_BUCKET,
             Key: objectKey,
+            ContentType: contentType,
         }));
 
         logToUI(`🚀 R2 multipart upload bắt đầu: ${safeName}`, 'info');
@@ -1003,7 +1093,7 @@ app.post('/api/r2-finalize', async (req, res) => {
             const tmpFilename = `tmp_${jobId}_${path.basename(objectKey)}`;
             const tmpPath = path.join(UPLOADS_MAIN_DIR, tmpFilename);
             try {
-                await logRealtime('☁️ R2 đã nhận xong. Đang tải IPA về máy chủ để phân tích...', 'info');
+                await logRealtime('☁️ R2 đã nhận xong. Đang tải file về máy chủ để phân tích...', 'info');
 
                 const { Body } = await r2Client.send(new _R2Cmd.GetObjectCommand({
                     Bucket: process.env.R2_BUCKET,
@@ -1012,7 +1102,7 @@ app.post('/api/r2-finalize', async (req, res) => {
                 await streamToFile(Body, tmpPath);
 
                 const fileStat = await fs.promises.stat(tmpPath);
-                await logRealtime(`✅ Đã tải về (${formatBytes(fileStat.size)}). Đang phân tích IPA...`, 'success');
+                await logRealtime(`✅ Đã tải về (${formatBytes(fileStat.size)}). Đang phân tích metadata...`, 'success');
 
                 const finalFilename = path.basename(objectKey);
                 const mockRes = {
@@ -1031,9 +1121,9 @@ app.post('/api/r2-finalize', async (req, res) => {
                 if (mockRes._statusCode >= 200 && mockRes._statusCode < 300 && mockRes._body?.success) {
                     jobStore.set(jobId, { status: 'done', result: mockRes._body, createdAt: Date.now() });
                 } else {
-                    const errMsg = mockRes._body?.message || 'Lỗi không xác định khi xử lý IPA.';
+                    const errMsg = mockRes._body?.message || 'Lỗi không xác định khi xử lý file.';
                     jobStore.set(jobId, { status: 'error', error: errMsg, createdAt: Date.now() });
-                    logToUI(`❌ R2 IPA processing failed (job ${jobId}): ${errMsg}`, 'error');
+                    logToUI(`❌ R2 processing failed (job ${jobId}): ${errMsg}`, 'error');
                     await deleteR2Object(objectKey); // Dọn object lỗi khỏi R2
                 }
             } catch (err) {

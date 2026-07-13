@@ -76,14 +76,23 @@
 
         function buildBuildMetaTags(item) {
             const tags = [];
-            if (item.minimumOsVersion) {
-                tags.push(`<span class="build-tag build-tag-ios">iOS ${escapeHtml(item.minimumOsVersion)}+</span>`);
-            }
-            if (item.profileType) {
-                tags.push(`<span class="build-tag build-tag-profile">${escapeHtml(item.profileType)}</span>`);
-            }
-            if (item.provisionedDevicesCount != null) {
-                tags.push(`<span class="build-tag build-tag-devices">${item.provisionedDevicesCount} thiết bị</span>`);
+            const platform = item.platform || 'ios';
+            if (platform === 'android') {
+                tags.push('<span class="build-tag build-tag-android">Android</span>');
+                if (item.minimumOsVersion) {
+                    tags.push(`<span class="build-tag build-tag-android">API ${escapeHtml(item.minimumOsVersion)}+</span>`);
+                }
+            } else {
+                tags.push('<span class="build-tag build-tag-ios">iOS</span>');
+                if (item.minimumOsVersion) {
+                    tags.push(`<span class="build-tag build-tag-ios">iOS ${escapeHtml(item.minimumOsVersion)}+</span>`);
+                }
+                if (item.profileType) {
+                    tags.push(`<span class="build-tag build-tag-profile">${escapeHtml(item.profileType)}</span>`);
+                }
+                if (item.provisionedDevicesCount != null) {
+                    tags.push(`<span class="build-tag build-tag-devices">${item.provisionedDevicesCount} thiết bị</span>`);
+                }
             }
             return tags.join('');
         }
@@ -204,13 +213,18 @@
         function renderAppDetail(group) {
             stopLoading();
             const { latest, builds } = group;
+            const platform = latest.platform || 'ios';
+            const platformLabel = platform === 'android' ? 'Android' : 'iOS';
 
             detailIcon.src = latest.icon || FALLBACK_ICON;
             detailIcon.onerror = () => { detailIcon.src = FALLBACK_ICON; };
-            detailName.innerText = latest.appName || 'Ứng dụng iOS';
+            detailName.innerText = latest.appName || `Ứng dụng ${platformLabel}`;
             detailBundle.innerText = latest.bundleId || '';
-            detailPageSub.innerText = `${builds.length} bản build của "${latest.appName}".`;
-            document.title = `${latest.appName || 'Ứng dụng'} — Share IPA`;
+            detailPageSub.innerText = `${builds.length} bản build ${platformLabel} của "${latest.appName}".`;
+            document.title = `${latest.appName || 'Ứng dụng'} (${platformLabel}) — Share IPA`;
+
+            const titleEl = document.getElementById('detail-page-title');
+            if (titleEl) titleEl.innerText = `Chi tiết ứng dụng ${platformLabel}`;
 
             if (detailShareBtn) detailShareBtn.style.display = 'inline-block';
             detailHeader.style.display = 'flex';
