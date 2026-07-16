@@ -238,7 +238,9 @@ function syncRouteFromUrl() {
     hideAppDetailPanel();
 }
 
-// Xóa 1 bản build (chỉ khả dụng với tài khoản có quyền 'delete_build') rồi làm mới danh mục + view hiện tại
+// Xóa 1 bản build (chỉ khả dụng với tài khoản có quyền 'delete_build') rồi làm mới danh mục + view hiện tại.
+// Cập nhật thẳng vào catalogItems đang có trong bộ nhớ (không chờ fetch lại /api/catalog) để tránh
+// hiển thị dữ liệu cũ nếu API GitHub trả về chậm/chưa kịp đồng bộ ngay sau khi ghi.
 async function handleDeleteBuild(build) {
     if (!canDeleteBuild()) return;
     const confirmed = confirm(`Xóa bản build "${build.appName}" v${build.version} (Build ${build.buildNumber})?\nHành động này không thể hoàn tác.`);
@@ -255,7 +257,9 @@ async function handleDeleteBuild(build) {
             throw new Error((data && data.message) || 'Xóa bản build thất bại.');
         }
 
-        await loadCatalog();
+        // Xóa ngay khỏi danh sách trong bộ nhớ rồi vẽ lại giao diện — không phụ thuộc round-trip mạng
+        catalogItems = catalogItems.filter(item => item.id !== build.id);
+        renderCatalog(true);
 
         const route = parseAppDetailRoute();
         if (route) {
@@ -263,7 +267,10 @@ async function handleDeleteBuild(build) {
             if (builds.length) {
                 detailViewCtrl.renderAppDetail({ latest: builds[0], builds });
             } else {
-                history.back();
+                // Không còn bản build nào của app này — quay về trang chủ (điều hướng SPA, không tải lại trang).
+                // Dùng replaceState (thay vì back()) để tránh phụ thuộc lịch sử trình duyệt và không bị tải lại trang.
+                history.replaceState({ view: 'home' }, '', '/');
+                hideAppDetailPanel();
             }
         }
     } catch (err) {
