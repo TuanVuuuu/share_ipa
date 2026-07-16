@@ -43,6 +43,8 @@ const authForm = document.getElementById('auth-form');
 const authError = document.getElementById('auth-error');
 const authSubmit = document.getElementById('auth-submit');
 const logoutBtn = document.getElementById('logout-btn');
+const authUsernameLabel = document.getElementById('auth-username-label');
+const authRoleBadge = document.getElementById('auth-role-badge');
 
 const catalogContainer = document.getElementById('catalog-container');
 const catalogList = document.getElementById('catalog-list');
@@ -53,7 +55,12 @@ const catalogRefreshBtn = document.getElementById('catalog-refresh-btn');
 const protectedAreas = [dropZone, progressArea, resultZone];
 
 let isAuthenticated = false;
+let currentUser = null; // { username, role, permissions }
 let logsSource = null;
+
+function canDeleteBuild() {
+    return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('delete_build'));
+}
 
 // Kết nối nhận log real-time từ máy Mac (chỉ khi đã đăng nhập)
 let logsReconnectTimer = null;
@@ -87,8 +94,13 @@ function connectLogs() {
 
 function applyAuthState(authenticated) {
     isAuthenticated = authenticated;
+    if (!authenticated) currentUser = null;
     authBox.style.display = authenticated ? 'none' : 'block';
     authStatus.style.display = authenticated ? 'flex' : 'none';
+    if (authenticated && currentUser) {
+        authUsernameLabel.innerText = currentUser.username;
+        authRoleBadge.innerText = currentUser.role;
+    }
     protectedAreas.forEach(el => el.classList.toggle('locked', !authenticated));
 
     catalogContainer.style.display = authenticated ? '' : 'none';
@@ -153,6 +165,8 @@ if (homeView && appDetailView && window.CatalogDetail) {
         detailEmpty: document.getElementById('detail-empty'),
         detailAuth: document.getElementById('detail-auth'),
         detailShareBtn: document.getElementById('detail-share-btn'),
+        canDeleteBuild: canDeleteBuild,
+        onDeleteBuild: handleDeleteBuild,
         qrModal: document.getElementById('qr-modal'),
         qrModalClose: document.getElementById('qr-modal-close'),
         qrModalTitle: document.getElementById('qr-modal-title'),
@@ -222,6 +236,39 @@ function syncRouteFromUrl() {
         }
     }
     hideAppDetailPanel();
+}
+
+// Xóa 1 bản build (chỉ khả dụng với tài khoản có quyền 'delete_build') rồi làm mới danh mục + view hiện tại
+async function handleDeleteBuild(build) {
+    if (!canDeleteBuild()) return;
+    const confirmed = confirm(`Xóa bản build "${build.appName}" v${build.version} (Build ${build.buildNumber})?\nHành động này không thể hoàn tác.`);
+    if (!confirmed) return;
+
+    try {
+        const res = await fetch('/api/catalog/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: build.id })
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.success) {
+            throw new Error((data && data.message) || 'Xóa bản build thất bại.');
+        }
+
+        await loadCatalog();
+
+        const route = parseAppDetailRoute();
+        if (route) {
+            const builds = getBuildsForBundle(route.bundleId, route.platform);
+            if (builds.length) {
+                detailViewCtrl.renderAppDetail({ latest: builds[0], builds });
+            } else {
+                history.back();
+            }
+        }
+    } catch (err) {
+        alert(err.message);
+    }
 }
 
 function navigateToAppDetail(bundleId, platform) {
@@ -359,8 +406,12 @@ async function checkAuthStatus() {
     try {
         const res = await fetch('/api/auth-status');
         const data = await res.json();
+        currentUser = data.authenticated
+            ? { username: data.username, role: data.role, permissions: data.permissions || [] }
+            : null;
         applyAuthState(!!data.authenticated);
     } catch (err) {
+        currentUser = null;
         applyAuthState(false);
     }
 }
@@ -386,6 +437,7 @@ authForm.addEventListener('submit', async (e) => {
             throw new Error(data.message || 'Đăng nhập thất bại.');
         }
         authForm.reset();
+        currentUser = { username: data.username, role: data.role, permissions: data.permissions || [] };
         applyAuthState(true);
     } catch (err) {
         authError.textContent = err.message;

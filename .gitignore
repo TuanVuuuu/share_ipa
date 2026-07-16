@@ -8,6 +8,9 @@ yarn.lock
 .env.local
 .env.*.local
 
+# Tài khoản đăng nhập (chứa mật khẩu thật) — dùng users.example.json làm mẫu
+users.json
+
 # Uploads and user files
 uploads/
 storage/

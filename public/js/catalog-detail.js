@@ -64,6 +64,8 @@
             detailEmpty,
             detailAuth,
             detailShareBtn,
+            canDeleteBuild,
+            onDeleteBuild,
             qrModal,
             qrModalClose,
             qrModalTitle,
@@ -187,25 +189,32 @@
 
         function renderBuilds(builds) {
             detailBuilds.innerHTML = '';
+            const showDelete = typeof canDeleteBuild === 'function' && canDeleteBuild();
             builds.forEach((build, index) => {
                 const metaTags = buildBuildMetaTags(build);
                 const devicesBlock = buildDevicesBlock(build);
+                const uploaderTag = build.uploadedBy ? ` • 👤 ${escapeHtml(build.uploadedBy)}` : '';
                 const row = document.createElement('div');
                 row.className = 'build-row';
                 row.innerHTML = `
                     <div class="build-info">
                         <span class="badge">v${escapeHtml(build.version)} (Build ${escapeHtml(build.buildNumber)})</span>
                         ${index === 0 ? '<span class="build-latest">Mới nhất</span>' : ''}
-                        <div class="build-sub">📦 ${escapeHtml(build.fileSize || '--')} • 🕒 ${escapeHtml(formatDateTime(build.uploadedAt))}</div>
+                        <div class="build-sub">📦 ${escapeHtml(build.fileSize || '--')} • 🕒 ${escapeHtml(formatDateTime(build.uploadedAt))}${uploaderTag}</div>
                         ${metaTags ? `<div class="build-tags">${metaTags}</div>` : ''}
                         ${devicesBlock}
                     </div>
                     <div class="build-actions">
                         <button type="button" class="btn secondary qr-btn">Xem QR</button>
                         <a class="btn install-mini" href="${escapeHtml(build.downloadUrl)}">Cài đặt</a>
+                        ${showDelete ? '<button type="button" class="btn danger delete-build-btn">Xóa</button>' : ''}
                     </div>
                 `;
                 row.querySelector('.qr-btn').addEventListener('click', () => openQrModal(build));
+                const deleteBtn = row.querySelector('.delete-build-btn');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', () => onDeleteBuild(build));
+                }
                 detailBuilds.appendChild(row);
             });
         }

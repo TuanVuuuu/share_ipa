@@ -10,6 +10,7 @@ const fs = require('fs');
 const AppInfoParser = require('app-info-parser');
 const QRCode = require('qrcode');
 const github = require('./github');
+const auth = require('./auth');
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.info';
 const CATALOG_PATH = 'catalog.json';       // Chỉ mục danh sách app trên repo lưu trữ
@@ -97,12 +98,6 @@ console.log('========== ENV ==========');
 console.log('__dirname:', __dirname);
 console.log('cwd:', process.cwd());
 
-console.log('ACCESS_USERNAME:', process.env.ACCESS_USERNAME);
-console.log('ACCESS_PASSWORD:', process.env.ACCESS_PASSWORD);
-
-console.log('USERNAME:', process.env.USERNAME);
-console.log('PASSWORD:', process.env.PASSWORD);
-
 console.log('GITHUB_REPO:', process.env.GITHUB_REPO);
 console.log('GITHUB_TOKEN:', process.env.GITHUB_TOKEN ? '***(đã cấu hình)' : '(chưa cấu hình)');
 
@@ -137,21 +132,34 @@ function parseCookies(cookieHeader = '') {
     }, {});
 }
 
-function getConfiguredCredentials() {
-    return {
-        username: process.env.ACCESS_USERNAME?.trim() || '',
-        password: process.env.ACCESS_PASSWORD?.trim() || ''
-    };
+// Lấy tài khoản đang đăng nhập từ cookie phiên đã ký (HMAC) — trả về null nếu chưa đăng nhập/cookie không hợp lệ.
+function getSessionUser(req) {
+    const cookies = parseCookies(req.headers.cookie || '');
+    return auth.verifySessionToken(cookies[AUTH_COOKIE_NAME]);
 }
 
 function isAuthenticated(req) {
-    const cookies = parseCookies(req.headers.cookie || '');
-    return cookies[AUTH_COOKIE_NAME] === 'true';
+    return !!getSessionUser(req);
 }
 
 function requireAuth(req, res, next) {
     if (isAuthenticated(req)) return next();
     return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập trước khi sử dụng.' });
+}
+
+// Middleware chặn theo quyền cụ thể (ví dụ: 'delete_build') — dùng cho các API nhạy cảm hơn requireAuth thường.
+function requirePermission(permission) {
+    return (req, res, next) => {
+        const user = getSessionUser(req);
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập trước khi sử dụng.' });
+        }
+        if (!auth.hasPermission(user, permission)) {
+            return res.status(403).json({ success: false, message: 'Tài khoản của bạn không có quyền thực hiện hành động này.' });
+        }
+        req.currentUser = user;
+        next();
+    };
 }
 
 app.use(express.json());
@@ -328,28 +336,26 @@ app.get('/app', (req, res) => {
     res.redirect(301, buildAppDetailPath(platform, bundleId));
 });
 
-// Kiểm tra trạng thái đăng nhập cho frontend
+// Kiểm tra trạng thái đăng nhập cho frontend (kèm role/quyền để bật/tắt tính năng như xóa bản build)
 app.get('/api/auth-status', (req, res) => {
-    res.json({ authenticated: isAuthenticated(req) });
+    const user = getSessionUser(req);
+    if (!user) return res.json({ authenticated: false });
+    res.json({ authenticated: true, ...auth.toPublicUser(user) });
 });
 
 // Đăng nhập bằng AJAX ngay trong trang chính
 app.post('/api/login', (req, res) => {
     const { username = '', password = '' } = req.body || {};
-    const configured = getConfiguredCredentials();
+    const user = auth.verifyCredentials(username, password);
 
-    const typedUsername = username.toString().trim();
-    const typedPassword = password.toString().trim();
-
-    if (typedUsername === configured.username &&
-        typedPassword === configured.password) {
-
+    if (user) {
+        const token = auth.createSessionToken(user.username);
         res.setHeader(
             'Set-Cookie',
-            `${AUTH_COOKIE_NAME}=true; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
+            `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
         );
 
-        return res.json({ success: true });
+        return res.json({ success: true, ...auth.toPublicUser(user) });
     }
 
     return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không đúng.' });
@@ -363,10 +369,10 @@ app.post('/api/logout', (req, res) => {
     res.json({ success: true });
 });
 
-// Chỉ bảo vệ các API nhạy cảm phía sau
-app.use('/api/upload-secure', requireAuth);
-app.use('/api/upload-chunk', requireAuth);
-app.use('/api/upload-finalize', requireAuth);
+// Chỉ bảo vệ các API nhạy cảm phía sau — đẩy bản build yêu cầu quyền 'upload_build'
+app.use('/api/upload-secure', requirePermission('upload_build'));
+app.use('/api/upload-chunk', requirePermission('upload_build'));
+app.use('/api/upload-finalize', requirePermission('upload_build'));
 app.use('/api/logs', requireAuth);
 app.use('/api/catalog', requireAuth);
 
@@ -421,19 +427,11 @@ async function readCatalog() {
     }
 }
 
-// 💾 Thêm một bản ghi app mới vào đầu danh mục và đẩy lên GitHub.
-// Tự động dọn dẹp: giới hạn 10 build/app (R2) và CATALOG_MAX_ITEMS toàn cục.
-// Trả về mảng các entry bị xóa (để caller xóa R2 object tương ứng nếu cần).
-async function appendToCatalog(record) {
-    if (!github.isConfigured()) {
-        logToUI('⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên bỏ qua bước lưu danh mục.', 'info');
-        return [];
-    }
-
+// Đọc file catalog.json kèm sha (cần sha để ghi đè an toàn qua GitHub API)
+async function loadCatalogFile() {
     const file = await github.getFile(CATALOG_PATH);
     let list = [];
     let sha;
-
     if (file) {
         sha = file.sha;
         try {
@@ -443,7 +441,45 @@ async function appendToCatalog(record) {
             logToUI(`⚠️ catalog.json hiện tại không hợp lệ, sẽ khởi tạo lại. (${err.message})`, 'info');
         }
     }
+    return { list, sha };
+}
 
+// Xóa file vật lý của một bản build (R2 object hoặc file local + bản sao lưu trữ + plist)
+async function deletePhysicalBuildFiles(record) {
+    if (record.r2ObjectKey) {
+        await deleteR2Object(record.r2ObjectKey);
+        return;
+    }
+    try {
+        const localPath = path.join(UPLOADS_MAIN_DIR, record.id);
+        if (fs.existsSync(localPath)) await fs.promises.unlink(localPath);
+
+        if ((record.platform || 'ios') !== 'android') {
+            const plistPath = `${localPath}.plist`;
+            if (fs.existsSync(plistPath)) await fs.promises.unlink(plistPath);
+        }
+
+        const safeAppName = (record.appName || '').replace(/[/\\?%*:|"<>\s]/g, '_');
+        const appFolder = path.join(ARCHIVE_STORAGE_DIR, `${safeAppName}_${record.bundleId}`);
+        const archivedFile = path.join(appFolder, record.id);
+        if (fs.existsSync(archivedFile)) await fs.promises.unlink(archivedFile);
+        const archivedMeta = `${archivedFile}.json`;
+        if (fs.existsSync(archivedMeta)) await fs.promises.unlink(archivedMeta);
+    } catch (err) {
+        logToUI(`⚠️ Lỗi khi xóa file vật lý của bản build: ${err.message}`, 'info');
+    }
+}
+
+// 💾 Thêm một bản ghi app mới vào đầu danh mục và đẩy lên GitHub.
+// Tự động dọn dẹp: giới hạn 10 build/app (R2) và CATALOG_MAX_ITEMS toàn cục.
+// Trả về mảng các entry bị xóa (để caller xóa R2 object tương ứng nếu cần).
+async function appendToCatalog(record) {
+    if (!github.isConfigured()) {
+        logToUI('⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên bỏ qua bước lưu danh mục.', 'info');
+        return [];
+    }
+
+    const { list, sha } = await loadCatalogFile();
     const removed = [];
 
     // Per-app limit: giữ tối đa 10 build/app trong R2 — xóa bản cũ nhất trước khi thêm mới
@@ -488,6 +524,44 @@ app.get('/api/catalog', async (req, res) => {
         res.json({ success: true, configured: github.isConfigured(), items: list });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh mục: ${err.message}` });
+    }
+});
+
+// 🗑️ Xóa một bản build khỏi danh mục + kho lưu trữ. Chỉ tài khoản có quyền 'delete_build' (role admin).
+app.post('/api/catalog/delete', requirePermission('delete_build'), async (req, res) => {
+    try {
+        const targetId = (req.body?.id || '').toString().trim();
+        if (!targetId) {
+            return res.status(400).json({ success: false, message: 'Thiếu id bản build cần xóa.' });
+        }
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên không thể cập nhật danh mục.' });
+        }
+
+        const { list, sha } = await loadCatalogFile();
+        const idx = list.findIndex(item => item.id === targetId);
+        if (idx === -1) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy bản build này trong danh mục (có thể đã bị xóa).' });
+        }
+
+        const [removedRecord] = list.splice(idx, 1);
+        const actor = req.currentUser.username;
+
+        await github.putFile(
+            CATALOG_PATH,
+            JSON.stringify(list, null, 2),
+            `delete ${removedRecord.appName} ${removedRecord.version} (${removedRecord.buildNumber}) by ${actor}`,
+            sha
+        );
+
+        await deletePhysicalBuildFiles(removedRecord);
+
+        logToUI(`🗑️ ${actor} đã xóa bản build "${removedRecord.appName}" v${removedRecord.version} (Build ${removedRecord.buildNumber})`, 'info');
+
+        return res.json({ success: true, removed: removedRecord });
+    } catch (err) {
+        logToUI(`❌ Lỗi khi xóa bản build: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi khi xóa bản build: ${err.message}` });
     }
 });
 
@@ -708,7 +782,7 @@ function mapParsedAppInfo(result, platform) {
 // 🧠 HÀM DÙNG CHUNG: bóc tách IPA/APK đã nằm sẵn trên đĩa -> tạo link -> trả phản hồi -> lưu trữ ở nền.
 // Dùng cho cả upload 1 lần (upload-secure), chunk cũ (upload-finalize), lẫn R2 (r2-finalize).
 // r2ObjectKey: nếu có, file đang nằm trên R2 → dùng URL R2, bỏ qua local archive.
-async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes, r2ObjectKey = null }) {
+async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes, r2ObjectKey = null, uploadedBy = null }) {
     const startTime = performance.now();
     const formattedTotalSize = formatBytes(fileSizeBytes);
     const platform = detectPlatform(finalFilename);
@@ -727,6 +801,9 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
             const totalProcessTime = ((performance.now() - startTime) / 1000).toFixed(2);
 
             await logRealtime(`✅ Phân tích cấu trúc thành công: ${appInfo.appName} | Phiên bản: ${appInfo.version} (${platform}) trong ${totalProcessTime} giây`, 'success');
+            if (uploadedBy) {
+                await logRealtime(`👤 Người đẩy bản build: ${uploadedBy}`, 'info');
+            }
 
             // URL công khai của file: R2 (nếu upload qua R2) hoặc local (legacy)
             const filePublicUrl = r2ObjectKey
@@ -836,6 +913,7 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                         uploadedAt,
                         processTimeSeconds: totalProcessTime,
                         r2ObjectKey: r2ObjectKey || null, // null = legacy local storage
+                        uploadedBy: uploadedBy || null,   // lưu vết ai đã đẩy bản build này
                     };
 
                     await logRealtime('☁️ Đang đồng bộ thông tin app lên danh mục GitHub...', 'info');
@@ -871,10 +949,12 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ success: false, message: 'Không tìm thấy tệp tin IPA/APK.' });
     }
+    const sessionUser = getSessionUser(req);
     return processUploadedIpa(res, {
         finalFilename: req.file.filename,
         finalPath: req.file.path,
-        fileSizeBytes: req.file.size
+        fileSizeBytes: req.file.size,
+        uploadedBy: sessionUser?.username || null
     });
 });
 
@@ -952,6 +1032,7 @@ app.post('/api/upload-finalize', async (req, res) => {
 
         const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         jobStore.set(jobId, { status: 'pending', createdAt: Date.now() });
+        const uploadedBy = getSessionUser(req)?.username || null;
 
         // Trả về jobId ngay — client sẽ polling để nhận kết quả
         res.json({ success: true, status: 'pending', jobId });
@@ -984,7 +1065,7 @@ app.post('/api/upload-finalize', async (req, res) => {
                     json(body) { this._body = body; }
                 };
 
-                await processUploadedIpa(mockRes, { finalFilename, finalPath, fileSizeBytes: expectedSize });
+                await processUploadedIpa(mockRes, { finalFilename, finalPath, fileSizeBytes: expectedSize, uploadedBy });
 
                 if (mockRes._statusCode >= 200 && mockRes._statusCode < 300 && mockRes._body?.success) {
                     jobStore.set(jobId, { status: 'done', result: mockRes._body, createdAt: Date.now() });
@@ -1005,9 +1086,9 @@ app.post('/api/upload-finalize', async (req, res) => {
 });
 
 // ─── Cloudflare R2 Upload API ────────────────────────────────────────────────
-app.use('/api/r2-start',    requireAuth);
-app.use('/api/r2-part-url', requireAuth);
-app.use('/api/r2-finalize', requireAuth);
+app.use('/api/r2-start',    requirePermission('upload_build'));
+app.use('/api/r2-part-url', requirePermission('upload_build'));
+app.use('/api/r2-finalize', requirePermission('upload_build'));
 
 // Bước 1: Khởi tạo multipart upload trên R2, nhận UploadId + objectKey
 app.post('/api/r2-start', async (req, res) => {
@@ -1086,6 +1167,7 @@ app.post('/api/r2-finalize', async (req, res) => {
 
         const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         jobStore.set(jobId, { status: 'pending', createdAt: Date.now() });
+        const uploadedBy = getSessionUser(req)?.username || null;
         res.json({ success: true, status: 'pending', jobId });
 
         // Xử lý nền: tải IPA từ R2 về temp → parse → trả kết quả → dọn temp
@@ -1116,6 +1198,7 @@ app.post('/api/r2-finalize', async (req, res) => {
                     finalPath: tmpPath,
                     fileSizeBytes: Number(totalSize) || fileStat.size,
                     r2ObjectKey: objectKey,
+                    uploadedBy,
                 });
 
                 if (mockRes._statusCode >= 200 && mockRes._statusCode < 300 && mockRes._body?.success) {
