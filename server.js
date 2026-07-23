@@ -20,7 +20,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '14';
+const ASSET_VERSION = process.env.ASSET_VERSION || '15';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -164,8 +164,20 @@ function requirePermission(permission) {
     };
 }
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: false, limit: '5mb' }));
+
+// Trả JSON khi body quá lớn / JSON lỗi (tránh client nhận HTML rồi fail parse)
+app.use((err, req, res, next) => {
+    if (!err) return next();
+    if (err.type === 'entity.too.large') {
+        return res.status(413).json({ success: false, message: 'Dữ liệu gửi lên quá lớn (ảnh icon/banner). Hãy dùng ảnh nhỏ hơn.' });
+    }
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        return res.status(400).json({ success: false, message: 'JSON không hợp lệ.' });
+    }
+    return next(err);
+});
 
 // Tạo block Open Graph + Twitter Card meta tags để Discord/Slack unfurl link đẹp
 function buildOgMeta({ title, description, image, url } = {}) {
@@ -555,6 +567,36 @@ async function saveJsonArrayFile(filePath, list, message, sha) {
     await github.putFile(filePath, JSON.stringify(list, null, 2), message, sha);
 }
 
+// Lưu data URL ảnh vào /uploads/download-assets, trả về URL public (tránh nhồi base64 vào GitHub JSON)
+function persistDownloadImage(dataUrlOrUrl, kind) {
+    const raw = (dataUrlOrUrl || '').toString().trim();
+    if (!raw) return null;
+    if (/^https?:\/\//i.test(raw) || raw.startsWith('/uploads/')) return raw;
+
+    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/i.exec(raw);
+    if (!match) return null;
+
+    const mime = match[1].toLowerCase();
+    const extMap = {
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'image/gif': 'gif',
+    };
+    const ext = extMap[mime] || 'png';
+    const buf = Buffer.from(match[2], 'base64');
+    if (buf.length > 2 * 1024 * 1024) {
+        throw new Error(`Ảnh ${kind} vượt quá 2MB sau khi nén.`);
+    }
+
+    const dir = path.join(UPLOADS_MAIN_DIR, 'download-assets');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filename = `dl_${kind}_${Date.now()}_${makeShortId()}.${ext}`;
+    fs.writeFileSync(path.join(dir, filename), buf);
+    return `${PUBLIC_BASE_URL}/uploads/download-assets/${encodeURIComponent(filename)}`;
+}
+
 function publicProduct(p) {
     return {
         id: p.id,
@@ -728,8 +770,14 @@ app.post('/api/download-products', requirePermission('manage_download_products')
         const name = (req.body?.name || '').toString().trim();
         const iosBundleId = (req.body?.iosBundleId || '').toString().trim();
         const androidBundleId = (req.body?.androidBundleId || '').toString().trim();
-        const icon = (req.body?.icon || '').toString().trim() || null;
-        const banner = (req.body?.banner || '').toString().trim() || null;
+        let icon = null;
+        let banner = null;
+        try {
+            icon = persistDownloadImage(req.body?.icon, 'icon');
+            banner = persistDownloadImage(req.body?.banner, 'banner');
+        } catch (imgErr) {
+            return res.status(400).json({ success: false, message: imgErr.message });
+        }
         if (!name) {
             return res.status(400).json({ success: false, message: 'Thiếu tên mục download.' });
         }
@@ -768,8 +816,6 @@ app.post('/api/download-products/update', requirePermission('manage_download_pro
         const name = (req.body?.name || '').toString().trim();
         const iosBundleId = (req.body?.iosBundleId || '').toString().trim();
         const androidBundleId = (req.body?.androidBundleId || '').toString().trim();
-        const icon = (req.body?.icon || '').toString().trim() || null;
-        const banner = (req.body?.banner || '').toString().trim() || null;
         if (!id) return res.status(400).json({ success: false, message: 'Thiếu id mục download.' });
         if (!name) return res.status(400).json({ success: false, message: 'Thiếu tên mục download.' });
         if (!iosBundleId && !androidBundleId) {
@@ -779,6 +825,19 @@ app.post('/api/download-products/update', requirePermission('manage_download_pro
         const { list, sha } = await loadJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
         const idx = list.findIndex(item => item.id === id);
         if (idx === -1) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+
+        let icon = list[idx].icon || null;
+        let banner = list[idx].banner || null;
+        try {
+            if (Object.prototype.hasOwnProperty.call(req.body || {}, 'icon')) {
+                icon = persistDownloadImage(req.body?.icon, 'icon');
+            }
+            if (Object.prototype.hasOwnProperty.call(req.body || {}, 'banner')) {
+                banner = persistDownloadImage(req.body?.banner, 'banner');
+            }
+        } catch (imgErr) {
+            return res.status(400).json({ success: false, message: imgErr.message });
+        }
 
         list[idx] = {
             ...list[idx],

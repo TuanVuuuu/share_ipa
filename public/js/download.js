@@ -74,13 +74,55 @@ function toggleAdminForm(show) {
     if (toggleCreateBtn) toggleCreateBtn.style.display = show ? 'none' : '';
 }
 
-function readFileAsDataUrl(file) {
+function loadImageFromFile(file) {
     return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(new Error('Không đọc được file ảnh.'));
-        reader.readAsDataURL(file);
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            resolve(img);
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('File ảnh không hợp lệ.'));
+        };
+        img.src = url;
     });
+}
+
+async function compressImageFile(file, maxWidth, maxHeight, quality) {
+    if (!file) return '';
+    if (file.size > 8 * 1024 * 1024) {
+        throw new Error('Ảnh quá lớn (tối đa 8MB). Hãy chọn ảnh nhỏ hơn.');
+    }
+    const img = await loadImageFromFile(file);
+    let width = img.naturalWidth || img.width;
+    let height = img.naturalHeight || img.height;
+    if (!width || !height) throw new Error('Không đọc được kích thước ảnh.');
+
+    const ratio = Math.min(1, maxWidth / width, maxHeight / height);
+    width = Math.max(1, Math.round(width * ratio));
+    height = Math.max(1, Math.round(height * ratio));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, width, height);
+    return canvas.toDataURL('image/jpeg', quality);
+}
+
+async function parseJsonResponse(res) {
+    const text = await res.text();
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        throw new Error(
+            res.status === 413
+                ? 'Ảnh quá lớn, server từ chối. Hãy dùng icon/banner nhỏ hơn.'
+                : `Server trả về lỗi (HTTP ${res.status}). Hãy refresh trang (Ctrl/Cmd+Shift+R) rồi thử lại.`
+        );
+    }
 }
 
 function buildOptionLabel(build) {
@@ -358,7 +400,7 @@ async function saveProduct() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(isEdit ? { id: editingProductId, ...payload } : payload),
         });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (!res.ok || !data.success) throw new Error(data.message || 'Lưu thất bại.');
         if (isEdit) {
             products = products.map(p => p.id === data.item.id ? data.item : p);
@@ -420,16 +462,18 @@ async function init() {
             return;
         }
 
-        if (canManageProducts()) {
-            toggleCreateBtn.style.display = '';
-            listSub.textContent = 'Admin tạo mục (tên + bundle). Tester chọn mục, gắn bản build và lưu link gửi đối tác.';
-        }
-
         const res = await fetch('/api/download-products');
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (!res.ok || !data.success) throw new Error(data.message || 'Không tải được mục download.');
         products = data.items || [];
         renderProductList();
+
+        if (canManageProducts()) {
+            toggleCreateBtn.style.display = '';
+            listSub.textContent = 'Chỉ hiện danh mục do admin tạo. Bấm “Tạo danh mục” để thêm mục mới.';
+        } else {
+            listSub.textContent = 'Chọn danh mục do admin tạo, gắn bản iOS/Android rồi lưu link gửi đối tác.';
+        }
 
         const params = new URLSearchParams(window.location.search);
         const id = params.get('id');
@@ -439,6 +483,7 @@ async function init() {
         appList.classList.remove('is-loading');
         listEmpty.style.display = 'block';
         listEmpty.textContent = err.message || 'Lỗi tải dữ liệu.';
+        if (canManageProducts() && toggleCreateBtn) toggleCreateBtn.style.display = '';
     }
 }
 
@@ -455,9 +500,13 @@ productIconFileInput.addEventListener('change', async () => {
     const file = productIconFileInput.files && productIconFileInput.files[0];
     if (!file) return;
     try {
-        selectedIconData = await readFileAsDataUrl(file);
+        adminFormError.textContent = '';
+        selectedIconData = await compressImageFile(file, 256, 256, 0.85);
         setPreviewImage(productIconPreview, selectedIconData, 'icon');
     } catch (err) {
+        selectedIconData = '';
+        productIconFileInput.value = '';
+        setPreviewImage(productIconPreview, '', '');
         adminFormError.textContent = err.message;
     }
 });
@@ -466,9 +515,13 @@ productBannerFileInput.addEventListener('change', async () => {
     const file = productBannerFileInput.files && productBannerFileInput.files[0];
     if (!file) return;
     try {
-        selectedBannerData = await readFileAsDataUrl(file);
+        adminFormError.textContent = '';
+        selectedBannerData = await compressImageFile(file, 1280, 720, 0.82);
         setPreviewImage(productBannerPreview, selectedBannerData, 'banner');
     } catch (err) {
+        selectedBannerData = '';
+        productBannerFileInput.value = '';
+        setPreviewImage(productBannerPreview, '', '');
         adminFormError.textContent = err.message;
     }
 });
