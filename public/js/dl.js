@@ -118,8 +118,29 @@ async function fetchBuild(id) {
 
 async function init() {
     const params = new URLSearchParams(window.location.search);
-    const iosId = (params.get('ios') || '').trim();
-    const androidId = (params.get('android') || '').trim();
+    const shareId = (params.get('s') || '').trim();
+    let iosId = (params.get('ios') || '').trim();
+    let androidId = (params.get('android') || '').trim();
+    let productTitle = '';
+
+    if (shareId) {
+        try {
+            const res = await fetch(`/api/download-shares/${encodeURIComponent(shareId)}`);
+            const data = await res.json();
+            if (!res.ok || !data.success || !data.item) {
+                throw new Error(data.message || 'Không tìm thấy link chia sẻ.');
+            }
+            iosId = data.item.iosBuildId || '';
+            androidId = data.item.androidBuildId || '';
+            productTitle = data.item.productName || '';
+        } catch (err) {
+            showError(err.message || 'Không tải được link chia sẻ.');
+            dlAppName.textContent = 'Share IPA';
+            tabIos.style.display = 'none';
+            tabAndroid.style.display = 'none';
+            return;
+        }
+    }
 
     if (!iosId && !androidId) {
         showError('Liên kết không hợp lệ. Thiếu thông tin bản build.');
@@ -159,10 +180,13 @@ async function init() {
             initial = 'android';
         }
 
-        dlAppName.textContent = (builds.ios || builds.android).appName || 'Ứng dụng';
+        const fallbackName = (builds.ios || builds.android).appName || 'Ứng dụng';
+        dlAppName.textContent = productTitle || fallbackName;
+        document.title = `${productTitle || fallbackName} — Share IPA`;
 
         stopLoading();
         setActiveTab(initial);
+        if (productTitle) dlAppName.textContent = productTitle;
     } catch (err) {
         showError(err.message || 'Không tải được thông tin bản build.');
         dlAppName.textContent = 'Share IPA';

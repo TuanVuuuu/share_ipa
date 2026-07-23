@@ -14,11 +14,13 @@ const auth = require('./auth');
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.info';
 const CATALOG_PATH = 'catalog.json';       // Chỉ mục danh sách app trên repo lưu trữ
+const DOWNLOAD_PRODUCTS_PATH = 'download-products.json'; // Mục download do admin tạo (tên + bundle)
+const DOWNLOAD_SHARES_PATH = 'download-shares.json';     // Link do tester tạo và lưu
 const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ lại trong danh mục
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '13';
+const ASSET_VERSION = process.env.ASSET_VERSION || '14';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -303,19 +305,37 @@ app.get('/download', (req, res) => {
     sendHtmlWithOg(res, 'download.html', og);
 });
 
-// Trang public đối tác: /dl?ios=<id>&android=<id>
+// Trang public đối tác: /dl?s=<shareId> hoặc /dl?ios=<id>&android=<id>
 app.get('/dl', async (req, res) => {
-    const iosId = (req.query.ios || '').toString().trim();
-    const androidId = (req.query.android || '').toString().trim();
+    const shareId = (req.query.s || '').toString().trim();
+    let iosId = (req.query.ios || '').toString().trim();
+    let androidId = (req.query.android || '').toString().trim();
+    let productName = '';
+
+    if (shareId) {
+        try {
+            const shares = await readJsonArrayFile(DOWNLOAD_SHARES_PATH);
+            const share = shares.find(item => item.id === shareId);
+            if (share) {
+                iosId = share.iosBuildId || '';
+                androidId = share.androidBuildId || '';
+                productName = share.productName || '';
+            }
+        } catch (_) { /* giữ query gốc */ }
+    }
+
     const qs = new URLSearchParams();
-    if (iosId) qs.set('ios', iosId);
-    if (androidId) qs.set('android', androidId);
+    if (shareId) qs.set('s', shareId);
+    else {
+        if (iosId) qs.set('ios', iosId);
+        if (androidId) qs.set('android', androidId);
+    }
     const pageUrl = qs.toString()
         ? `${PUBLIC_BASE_URL}/dl?${qs.toString()}`
         : `${PUBLIC_BASE_URL}/dl`;
 
     let og = buildOgMeta({
-        title: 'Tải ứng dụng — Share IPA',
+        title: productName ? `${productName} — Share IPA` : 'Tải ứng dụng — Share IPA',
         description: 'Quét mã QR hoặc nhấn nút để cài đặt bản build đã được chia sẻ.',
         url: pageUrl,
     });
@@ -328,8 +348,8 @@ app.get('/dl', async (req, res) => {
                 || (androidId && androidId !== firstId ? list.find(item => item.id === androidId) : null);
             if (record) {
                 og = buildOgMeta({
-                    title: `${record.appName} — Share IPA`,
-                    description: `Cài đặt ${record.appName} · chọn nền tảng iOS hoặc Android`,
+                    title: `${productName || record.appName} — Share IPA`,
+                    description: `Cài đặt ${productName || record.appName} · chọn nền tảng iOS hoặc Android`,
                     image: record.icon || undefined,
                     url: pageUrl,
                 });
@@ -497,6 +517,73 @@ async function loadCatalogFile() {
     return { list, sha };
 }
 
+// ─── Download products / shares (GitHub JSON) ───────────────────────────────
+function makeShortId() {
+    return require('crypto').randomBytes(6).toString('hex');
+}
+
+async function readJsonArrayFile(filePath) {
+    if (!github.isConfigured()) return [];
+    const file = await github.getFile(filePath);
+    if (!file) return [];
+    try {
+        const parsed = JSON.parse(file.content);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        console.error(`Không đọc được ${filePath}:`, err.message);
+        return [];
+    }
+}
+
+async function loadJsonArrayFile(filePath) {
+    const file = await github.getFile(filePath);
+    let list = [];
+    let sha;
+    if (file) {
+        sha = file.sha;
+        try {
+            const parsed = JSON.parse(file.content);
+            if (Array.isArray(parsed)) list = parsed;
+        } catch (err) {
+            logToUI(`⚠️ ${filePath} không hợp lệ, sẽ khởi tạo lại. (${err.message})`, 'info');
+        }
+    }
+    return { list, sha };
+}
+
+async function saveJsonArrayFile(filePath, list, message, sha) {
+    await github.putFile(filePath, JSON.stringify(list, null, 2), message, sha);
+}
+
+function publicProduct(p) {
+    return {
+        id: p.id,
+        name: p.name,
+        iosBundleId: p.iosBundleId || '',
+        androidBundleId: p.androidBundleId || '',
+        createdAt: p.createdAt || null,
+        createdBy: p.createdBy || null,
+        updatedAt: p.updatedAt || null,
+    };
+}
+
+function publicShare(s) {
+    return {
+        id: s.id,
+        productId: s.productId,
+        productName: s.productName || '',
+        iosBuildId: s.iosBuildId || null,
+        androidBuildId: s.androidBuildId || null,
+        iosVersion: s.iosVersion || null,
+        iosBuildNumber: s.iosBuildNumber || null,
+        androidVersion: s.androidVersion || null,
+        androidBuildNumber: s.androidBuildNumber || null,
+        createdAt: s.createdAt || null,
+        createdBy: s.createdBy || null,
+        shareUrl: `${PUBLIC_BASE_URL}/dl?s=${encodeURIComponent(s.id)}`,
+    };
+}
+
 // Xóa file vật lý của một bản build (R2 object hoặc file local + bản sao lưu trữ + plist)
 async function deletePhysicalBuildFiles(record) {
     if (record.r2ObjectKey) {
@@ -615,6 +702,278 @@ app.post('/api/catalog/delete', requirePermission('delete_build'), async (req, r
     } catch (err) {
         logToUI(`❌ Lỗi khi xóa bản build: ${err.message}`, 'error');
         return res.status(500).json({ success: false, message: `Lỗi khi xóa bản build: ${err.message}` });
+    }
+});
+
+// ─── Download products (admin tạo) + shares (tester lưu) ────────────────────
+app.get('/api/download-products', requirePermission('create_download_link'), async (req, res) => {
+    try {
+        const list = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const sorted = [...list].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'vi'));
+        res.json({ success: true, items: sorted.map(publicProduct) });
+    } catch (err) {
+        res.status(500).json({ success: false, message: `Không tải được mục download: ${err.message}` });
+    }
+});
+
+app.post('/api/download-products', requirePermission('manage_download_products'), async (req, res) => {
+    try {
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể lưu mục download.' });
+        }
+        const name = (req.body?.name || '').toString().trim();
+        const iosBundleId = (req.body?.iosBundleId || '').toString().trim();
+        const androidBundleId = (req.body?.androidBundleId || '').toString().trim();
+        if (!name) {
+            return res.status(400).json({ success: false, message: 'Thiếu tên mục download.' });
+        }
+        if (!iosBundleId && !androidBundleId) {
+            return res.status(400).json({ success: false, message: 'Cần ít nhất một bundleId (iOS hoặc Android).' });
+        }
+
+        const { list, sha } = await loadJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const now = new Date().toISOString();
+        const product = {
+            id: makeShortId(),
+            name,
+            iosBundleId,
+            androidBundleId,
+            createdAt: now,
+            updatedAt: now,
+            createdBy: req.currentUser.username,
+        };
+        list.unshift(product);
+        await saveJsonArrayFile(DOWNLOAD_PRODUCTS_PATH, list, `add download product ${name}`, sha);
+        logToUI(`📦 ${req.currentUser.username} tạo mục download "${name}"`, 'info');
+        return res.json({ success: true, item: publicProduct(product) });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: `Lỗi tạo mục download: ${err.message}` });
+    }
+});
+
+app.post('/api/download-products/update', requirePermission('manage_download_products'), async (req, res) => {
+    try {
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể cập nhật mục download.' });
+        }
+        const id = (req.body?.id || '').toString().trim();
+        const name = (req.body?.name || '').toString().trim();
+        const iosBundleId = (req.body?.iosBundleId || '').toString().trim();
+        const androidBundleId = (req.body?.androidBundleId || '').toString().trim();
+        if (!id) return res.status(400).json({ success: false, message: 'Thiếu id mục download.' });
+        if (!name) return res.status(400).json({ success: false, message: 'Thiếu tên mục download.' });
+        if (!iosBundleId && !androidBundleId) {
+            return res.status(400).json({ success: false, message: 'Cần ít nhất một bundleId (iOS hoặc Android).' });
+        }
+
+        const { list, sha } = await loadJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const idx = list.findIndex(item => item.id === id);
+        if (idx === -1) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+
+        list[idx] = {
+            ...list[idx],
+            name,
+            iosBundleId,
+            androidBundleId,
+            updatedAt: new Date().toISOString(),
+        };
+        await saveJsonArrayFile(DOWNLOAD_PRODUCTS_PATH, list, `update download product ${name}`, sha);
+        return res.json({ success: true, item: publicProduct(list[idx]) });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: `Lỗi cập nhật mục download: ${err.message}` });
+    }
+});
+
+app.post('/api/download-products/delete', requirePermission('manage_download_products'), async (req, res) => {
+    try {
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể xóa mục download.' });
+        }
+        const id = (req.body?.id || '').toString().trim();
+        const { list, sha } = await loadJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const idx = list.findIndex(item => item.id === id);
+        if (idx === -1) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+        const [removed] = list.splice(idx, 1);
+        await saveJsonArrayFile(DOWNLOAD_PRODUCTS_PATH, list, `delete download product ${removed.name}`, sha);
+
+        try {
+            const sharesFile = await loadJsonArrayFile(DOWNLOAD_SHARES_PATH);
+            const nextShares = sharesFile.list.filter(s => s.productId !== id);
+            if (nextShares.length !== sharesFile.list.length) {
+                await saveJsonArrayFile(
+                    DOWNLOAD_SHARES_PATH,
+                    nextShares,
+                    `cleanup shares for deleted product ${removed.name}`,
+                    sharesFile.sha
+                );
+            }
+        } catch (_) { /* không chặn xóa product */ }
+
+        logToUI(`🗑️ ${req.currentUser.username} xóa mục download "${removed.name}"`, 'info');
+        return res.json({ success: true, removed: publicProduct(removed) });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: `Lỗi xóa mục download: ${err.message}` });
+    }
+});
+
+app.get('/api/download-products/:id/builds', requirePermission('create_download_link'), async (req, res) => {
+    try {
+        const id = (req.params.id || '').toString().trim();
+        const products = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const product = products.find(item => item.id === id);
+        if (!product) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+
+        const catalog = await readCatalog();
+        const mapBuild = (item) => ({
+            id: item.id,
+            appName: item.appName,
+            bundleId: item.bundleId,
+            platform: item.platform || 'ios',
+            version: item.version,
+            buildNumber: item.buildNumber,
+            icon: item.icon,
+            uploadedAt: item.uploadedAt,
+            shareUrl: item.shareUrl,
+            downloadUrl: item.downloadUrl,
+            qr: item.qr || null,
+        });
+        const sortBuilds = (a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0);
+
+        const ios = product.iosBundleId
+            ? catalog
+                .filter(item => (item.bundleId || '') === product.iosBundleId)
+                .filter(item => (item.platform || 'ios') !== 'android')
+                .map(mapBuild)
+                .sort(sortBuilds)
+            : [];
+        const android = product.androidBundleId
+            ? catalog
+                .filter(item => (item.bundleId || '') === product.androidBundleId)
+                .filter(item => (item.platform || 'ios') === 'android')
+                .map(mapBuild)
+                .sort(sortBuilds)
+            : [];
+
+        const icon = (ios[0] && ios[0].icon) || (android[0] && android[0].icon) || null;
+        return res.json({
+            success: true,
+            product: publicProduct(product),
+            ios,
+            android,
+            icon,
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: `Không tải được bản build: ${err.message}` });
+    }
+});
+
+app.get('/api/download-shares', requirePermission('create_download_link'), async (req, res) => {
+    try {
+        const productId = (req.query.productId || '').toString().trim();
+        let list = await readJsonArrayFile(DOWNLOAD_SHARES_PATH);
+        if (productId) list = list.filter(item => item.productId === productId);
+        list = [...list].sort((a, b) => (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0));
+        res.json({ success: true, items: list.map(publicShare) });
+    } catch (err) {
+        res.status(500).json({ success: false, message: `Không tải được link đã lưu: ${err.message}` });
+    }
+});
+
+app.post('/api/download-shares', requirePermission('create_download_link'), async (req, res) => {
+    try {
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể lưu link.' });
+        }
+        const productId = (req.body?.productId || '').toString().trim();
+        const iosBuildId = (req.body?.iosBuildId || '').toString().trim() || null;
+        const androidBuildId = (req.body?.androidBuildId || '').toString().trim() || null;
+        if (!productId) return res.status(400).json({ success: false, message: 'Thiếu productId.' });
+        if (!iosBuildId && !androidBuildId) {
+            return res.status(400).json({ success: false, message: 'Cần chọn ít nhất một bản iOS hoặc Android.' });
+        }
+
+        const products = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const product = products.find(item => item.id === productId);
+        if (!product) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+
+        const catalog = await readCatalog();
+        const iosBuild = iosBuildId ? catalog.find(item => item.id === iosBuildId) : null;
+        const androidBuild = androidBuildId ? catalog.find(item => item.id === androidBuildId) : null;
+        if (iosBuildId && !iosBuild) {
+            return res.status(400).json({ success: false, message: 'Không tìm thấy bản iOS đã chọn.' });
+        }
+        if (androidBuildId && !androidBuild) {
+            return res.status(400).json({ success: false, message: 'Không tìm thấy bản Android đã chọn.' });
+        }
+        if (iosBuild && product.iosBundleId && iosBuild.bundleId !== product.iosBundleId) {
+            return res.status(400).json({ success: false, message: 'Bản iOS không thuộc mục download này.' });
+        }
+        if (androidBuild && product.androidBundleId && androidBuild.bundleId !== product.androidBundleId) {
+            return res.status(400).json({ success: false, message: 'Bản Android không thuộc mục download này.' });
+        }
+
+        const { list, sha } = await loadJsonArrayFile(DOWNLOAD_SHARES_PATH);
+        const share = {
+            id: makeShortId(),
+            productId: product.id,
+            productName: product.name,
+            iosBuildId,
+            androidBuildId,
+            iosVersion: iosBuild ? iosBuild.version : null,
+            iosBuildNumber: iosBuild ? iosBuild.buildNumber : null,
+            androidVersion: androidBuild ? androidBuild.version : null,
+            androidBuildNumber: androidBuild ? androidBuild.buildNumber : null,
+            createdAt: new Date().toISOString(),
+            createdBy: req.currentUser.username,
+        };
+        list.unshift(share);
+        // Giữ tối đa 500 share
+        if (list.length > 500) list.length = 500;
+        await saveJsonArrayFile(
+            DOWNLOAD_SHARES_PATH,
+            list,
+            `add download share ${product.name} by ${req.currentUser.username}`,
+            sha
+        );
+        return res.json({ success: true, item: publicShare(share) });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: `Lỗi lưu link: ${err.message}` });
+    }
+});
+
+app.post('/api/download-shares/delete', requirePermission('create_download_link'), async (req, res) => {
+    try {
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể xóa link.' });
+        }
+        const id = (req.body?.id || '').toString().trim();
+        const { list, sha } = await loadJsonArrayFile(DOWNLOAD_SHARES_PATH);
+        const idx = list.findIndex(item => item.id === id);
+        if (idx === -1) return res.status(404).json({ success: false, message: 'Không tìm thấy link đã lưu.' });
+
+        const share = list[idx];
+        const isAdmin = auth.hasPermission(req.currentUser, 'manage_download_products');
+        if (!isAdmin && share.createdBy !== req.currentUser.username) {
+            return res.status(403).json({ success: false, message: 'Bạn chỉ có thể xóa link do mình tạo.' });
+        }
+        list.splice(idx, 1);
+        await saveJsonArrayFile(DOWNLOAD_SHARES_PATH, list, `delete download share ${id}`, sha);
+        return res.json({ success: true });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: `Lỗi xóa link: ${err.message}` });
+    }
+});
+
+// Public: resolve share đã lưu cho trang /dl?s=
+app.get('/api/download-shares/:id', async (req, res) => {
+    try {
+        const id = (req.params.id || '').toString().trim();
+        const list = await readJsonArrayFile(DOWNLOAD_SHARES_PATH);
+        const share = list.find(item => item.id === id);
+        if (!share) return res.status(404).json({ success: false, message: 'Không tìm thấy link chia sẻ.' });
+        return res.json({ success: true, item: publicShare(share) });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 

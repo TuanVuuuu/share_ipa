@@ -1363,3 +1363,102 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     display: inline-flex;
     align-items: center;
 }
+
+.dl-admin-form {
+    margin: 0 0 20px;
+    padding: 16px;
+    border: 1px solid #ececef;
+    border-radius: 12px;
+    background: #fafafa;
+}
+.dl-admin-form h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+}
+.dl-admin-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+.dl-admin-actions .btn {
+    flex: 1;
+    min-width: 120px;
+}
+.dl-app-card-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.dl-product-actions {
+    display: flex;
+    gap: 8px;
+    padding: 0 4px 4px;
+}
+.dl-product-actions .btn {
+    flex: 1;
+    font-size: 13px;
+    padding: 8px 10px;
+}
+.dl-app-card-icon-text {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+    font-size: 20px;
+    font-weight: 700;
+}
+.dl-saved-section {
+    margin-top: 28px;
+    padding-top: 18px;
+    border-top: 1px solid #ececef;
+}
+.dl-saved-section h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+}
+.dl-saved-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.dl-saved-row {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid #ececef;
+    border-radius: 12px;
+    background: #fafafa;
+}
+.dl-saved-info strong {
+    display: block;
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+.dl-saved-info p {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: #86868b;
+}
+.dl-saved-url {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
+    font-size: 12px;
+    background: #fff;
+}
+.dl-saved-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.dl-saved-actions .btn {
+    flex: 1;
+    text-align: center;
+    text-decoration: none;
+    font-size: 13px;
+    padding: 8px 10px;
+}

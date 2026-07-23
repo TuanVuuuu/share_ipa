@@ -11,11 +11,13 @@ const SESSION_SECRET = process.env.SESSION_SECRET || 'share-ipa-local-secret-cha
 
 // Ma trận quyền theo role.
 // upload_build: đẩy bản build | delete_build: xóa bản build
-// view_catalog: xem danh mục | create_download_link: tạo link /download cho đối tác
+// view_catalog: xem danh mục build đầy đủ
+// create_download_link: xem mục download + tạo/lưu link gửi đối tác
+// manage_download_products: admin tạo/sửa/xóa mục download (tên + bundleId)
 const ROLE_PERMISSIONS = {
-    admin: ['upload_build', 'delete_build', 'view_catalog', 'create_download_link'],
+    admin: ['upload_build', 'delete_build', 'view_catalog', 'create_download_link', 'manage_download_products'],
     dev: ['upload_build', 'view_catalog', 'create_download_link'],
-    tester: ['view_catalog', 'create_download_link'],
+    tester: ['create_download_link'],
 };
 
 function loadUsers() {

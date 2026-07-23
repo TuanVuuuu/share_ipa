@@ -70,6 +70,10 @@ function canCreateDownloadLink() {
     return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('create_download_link'));
 }
 
+function canViewCatalog() {
+    return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('view_catalog'));
+}
+
 // Kết nối nhận log real-time từ máy Mac (chỉ khi đã đăng nhập)
 let logsReconnectTimer = null;
 
@@ -127,6 +131,7 @@ function applyAuthState(authenticated) {
 
     const canUpload = authenticated && canUploadBuild();
     const canDownloadLink = authenticated && canCreateDownloadLink();
+    const showCatalog = authenticated && canViewCatalog();
 
     protectedAreas.forEach(el => {
         el.classList.toggle('locked', !canUpload);
@@ -138,7 +143,12 @@ function applyAuthState(authenticated) {
         downloadPageLink.style.display = canDownloadLink ? '' : 'none';
     }
 
-    catalogContainer.style.display = authenticated ? '' : 'none';
+    const downloadProductsContainer = document.getElementById('download-products-container');
+    if (downloadProductsContainer) {
+        downloadProductsContainer.style.display = canDownloadLink ? '' : 'none';
+    }
+
+    catalogContainer.style.display = showCatalog ? '' : 'none';
     logsContainer.style.display = canUpload ? '' : 'none';
 
     if (authenticated) {
@@ -150,7 +160,9 @@ function applyAuthState(authenticated) {
                 logsSource = null;
             }
         }
-        loadCatalog();
+        if (showCatalog) loadCatalog();
+        else setCatalogLoading(false);
+        if (canDownloadLink) loadDownloadProductsHome();
     } else {
         setCatalogLoading(false);
         clearTimeout(logsReconnectTimer);
@@ -335,6 +347,55 @@ function navigateToAppDetail(bundleId, platform) {
 function setCatalogLoading(loading) {
     catalogContainer.classList.toggle('is-loading', loading);
     if (loading) catalogEmpty.style.display = 'none';
+}
+
+async function loadDownloadProductsHome() {
+    const listEl = document.getElementById('download-products-list');
+    const emptyEl = document.getElementById('download-products-empty');
+    const subEl = document.getElementById('download-products-sub');
+    if (!listEl || !emptyEl) return;
+
+    listEl.innerHTML = '';
+    listEl.classList.add('is-loading');
+    emptyEl.style.display = 'none';
+    try {
+        const res = await fetch('/api/download-products');
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || 'Không tải được mục download.');
+        const items = data.items || [];
+        listEl.classList.remove('is-loading');
+        if (!items.length) {
+            emptyEl.style.display = 'block';
+            emptyEl.textContent = 'Chưa có mục download. Admin hãy tạo tại trang Download.';
+            return;
+        }
+        if (subEl) {
+            subEl.textContent = canViewCatalog()
+                ? 'Các mục download do admin tạo. Bấm để gắn bản build và tạo link.'
+                : 'Chọn mục bên dưới để tạo link gửi đối tác.';
+        }
+        for (const product of items) {
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = 'dl-app-card';
+            card.innerHTML = `
+                <div class="dl-app-card-icon dl-app-card-icon-text">${escapeHtml((product.name || '?').slice(0, 1).toUpperCase())}</div>
+                <div class="dl-app-card-info">
+                    <h4>${escapeHtml(product.name)}</h4>
+                    <p>${product.iosBundleId ? 'iOS' : '—'}${product.androidBundleId ? ' · Android' : ''}</p>
+                </div>
+                <span class="dl-app-card-arrow">›</span>
+            `;
+            card.addEventListener('click', () => {
+                window.location.href = `/download?id=${encodeURIComponent(product.id)}`;
+            });
+            listEl.appendChild(card);
+        }
+    } catch (err) {
+        listEl.classList.remove('is-loading');
+        emptyEl.style.display = 'block';
+        emptyEl.textContent = err.message || 'Lỗi tải mục download.';
+    }
 }
 
 async function loadCatalog() {

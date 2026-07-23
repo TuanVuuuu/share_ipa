@@ -8,7 +8,6 @@
     <link rel="icon" type="image/png" href="/ic_launcher_web.png">
     <link rel="apple-touch-icon" href="/ic_launcher_web.png">
     <link rel="stylesheet" href="/css/styles.css?v=__V__">
-    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -17,11 +16,35 @@
 
     <div id="list-view">
         <div class="catalog-head">
-            <h2>Tạo link tải</h2>
+            <h2>Mục download</h2>
         </div>
-        <p class="catalog-sub">Chọn ứng dụng, gắn 1 bản iOS và 1 bản Android, rồi gửi link cho đối tác.</p>
+        <p class="catalog-sub" id="list-sub">Chọn mục do admin tạo, gắn bản iOS/Android rồi lưu link gửi đối tác.</p>
+
+        <div id="admin-product-form" class="dl-admin-form" style="display:none;">
+            <h3 id="admin-form-title">Thêm mục download</h3>
+            <div class="dl-pick-fields">
+                <label class="dl-field">
+                    <span class="dl-field-label">Tên mục</span>
+                    <input type="text" id="product-name" class="dl-select" placeholder="Ví dụ: CIC Credit Connect" autocomplete="off">
+                </label>
+                <label class="dl-field">
+                    <span class="dl-field-label"><span class="build-tag build-tag-ios">iOS</span> Bundle ID</span>
+                    <input type="text" id="product-ios-bundle" class="dl-select" placeholder="com.example.app" autocomplete="off">
+                </label>
+                <label class="dl-field">
+                    <span class="dl-field-label"><span class="build-tag build-tag-android">Android</span> Package name</span>
+                    <input type="text" id="product-android-bundle" class="dl-select" placeholder="com.example.app" autocomplete="off">
+                </label>
+            </div>
+            <div class="dl-admin-actions">
+                <button type="button" class="btn" id="product-save-btn">Lưu mục</button>
+                <button type="button" class="btn secondary" id="product-cancel-btn" style="display:none;">Hủy sửa</button>
+            </div>
+            <p class="dl-field-hint" id="admin-form-error"></p>
+        </div>
+
         <div id="app-list" class="dl-app-list is-loading"></div>
-        <div id="list-empty" class="catalog-empty" style="display:none;">Chưa có ứng dụng trong danh mục.</div>
+        <div id="list-empty" class="catalog-empty" style="display:none;">Chưa có mục download. Admin hãy tạo mục mới ở trên.</div>
     </div>
 
     <div id="pick-view" style="display:none;">
@@ -48,12 +71,20 @@
         </div>
 
         <div class="dl-share-box">
-            <label for="share-link-input">Link gửi đối tác</label>
+            <button type="button" class="btn" id="save-share-btn">Lưu &amp; tạo link</button>
+            <p class="dl-field-hint" id="save-share-hint"></p>
+            <label for="share-link-input">Link vừa tạo</label>
             <div class="url-box">
                 <input type="text" id="share-link-input" readonly value="">
                 <button type="button" class="btn secondary" id="copy-share-btn">Sao chép</button>
             </div>
-            <a href="#" id="open-share-btn" class="btn" target="_blank" rel="noopener">Mở trang đối tác</a>
+            <a href="#" id="open-share-btn" class="btn secondary disabled" target="_blank" rel="noopener">Mở trang đối tác</a>
+        </div>
+
+        <div class="dl-saved-section">
+            <h3>Link đã lưu</h3>
+            <div id="saved-shares" class="dl-saved-list"></div>
+            <div id="saved-empty" class="catalog-empty" style="display:none;">Chưa có link nào được lưu cho mục này.</div>
         </div>
     </div>
 </div>
