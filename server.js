@@ -20,7 +20,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '17';
+const ASSET_VERSION = process.env.ASSET_VERSION || '18';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -1044,7 +1044,19 @@ app.get('/api/download-shares/:id', async (req, res) => {
         const list = await readJsonArrayFile(DOWNLOAD_SHARES_PATH);
         const share = list.find(item => item.id === id);
         if (!share) return res.status(404).json({ success: false, message: 'Không tìm thấy link chia sẻ.' });
-        return res.json({ success: true, item: publicShare(share) });
+
+        const enriched = { ...share };
+        if ((!enriched.productIcon || !enriched.productBanner || !enriched.productName) && enriched.productId) {
+            const products = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+            const product = products.find(item => item.id === enriched.productId);
+            if (product) {
+                if (!enriched.productName) enriched.productName = product.name || '';
+                if (!enriched.productIcon) enriched.productIcon = product.icon || null;
+                if (!enriched.productBanner) enriched.productBanner = product.banner || null;
+            }
+        }
+
+        return res.json({ success: true, item: publicShare(enriched) });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }

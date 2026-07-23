@@ -3,6 +3,7 @@ const dlContent = document.getElementById('dl-content');
 const dlError = document.getElementById('dl-error');
 const dlErrorText = document.getElementById('dl-error-text');
 const dlAppName = document.getElementById('dl-app-name');
+const dlAppIcon = document.getElementById('dl-app-icon');
 const dlBanner = document.getElementById('dl-banner');
 const dlBannerImage = document.getElementById('dl-banner-image');
 const dlTop = document.getElementById('dl-top');
@@ -32,6 +33,20 @@ function setCategoryTitle(name) {
     const title = categoryName || 'Tải ứng dụng';
     dlAppName.textContent = title;
     document.title = title;
+}
+
+function setCategoryIcon(iconUrl, altText) {
+    const src = (iconUrl || '').trim();
+    if (!src || !dlAppIcon) {
+        if (dlAppIcon) {
+            dlAppIcon.hidden = true;
+            dlAppIcon.removeAttribute('src');
+        }
+        return;
+    }
+    dlAppIcon.src = src;
+    dlAppIcon.alt = altText || categoryName || 'App icon';
+    dlAppIcon.hidden = false;
 }
 
 function stopLoading() {
@@ -133,6 +148,7 @@ async function init() {
     let androidId = (params.get('android') || '').trim();
     let productTitle = '';
     let productBanner = '';
+    let productIcon = '';
 
     if (shareId) {
         try {
@@ -145,10 +161,13 @@ async function init() {
             androidId = data.item.androidBuildId || '';
             productTitle = data.item.productName || '';
             productBanner = data.item.productBanner || '';
+            productIcon = data.item.productIcon || '';
             setCategoryTitle(productTitle);
+            setCategoryIcon(productIcon, productTitle);
         } catch (err) {
             showError(err.message || 'Không tải được link chia sẻ.');
             setCategoryTitle('');
+            setCategoryIcon('');
             tabIos.style.display = 'none';
             tabAndroid.style.display = 'none';
             return;
@@ -158,6 +177,7 @@ async function init() {
     if (!iosId && !androidId) {
         showError('Liên kết không hợp lệ. Thiếu thông tin bản build.');
         setCategoryTitle('');
+        setCategoryIcon('');
         tabIos.style.display = 'none';
         tabAndroid.style.display = 'none';
         return;
@@ -194,6 +214,7 @@ async function init() {
         }
 
         setCategoryTitle(productTitle);
+        setCategoryIcon(productIcon, productTitle);
         if (productBanner) {
             dlBannerImage.src = productBanner;
             dlBannerImage.alt = productTitle || 'Banner';
@@ -210,6 +231,7 @@ async function init() {
     } catch (err) {
         showError(err.message || 'Không tải được thông tin bản build.');
         setCategoryTitle(productTitle);
+        setCategoryIcon(productIcon, productTitle);
     }
 }
 

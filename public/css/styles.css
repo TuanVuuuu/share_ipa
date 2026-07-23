@@ -1249,13 +1249,18 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     color: #fff;
     box-sizing: border-box;
 }
-.dl-partner-brand {
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.75);
-    margin-bottom: 10px;
+.dl-partner-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+    object-fit: cover;
+    margin-bottom: 14px;
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    border: 2px solid rgba(255, 255, 255, 0.35);
+}
+.dl-partner-icon[hidden] {
+    display: none !important;
 }
 .dl-partner-title {
     margin: 0 0 22px;
