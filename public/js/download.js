@@ -23,9 +23,14 @@ const savedEmpty = document.getElementById('saved-empty');
 
 const adminForm = document.getElementById('admin-product-form');
 const adminFormTitle = document.getElementById('admin-form-title');
+const toggleCreateBtn = document.getElementById('toggle-create-btn');
 const productNameInput = document.getElementById('product-name');
 const productIosInput = document.getElementById('product-ios-bundle');
 const productAndroidInput = document.getElementById('product-android-bundle');
+const productIconFileInput = document.getElementById('product-icon-file');
+const productBannerFileInput = document.getElementById('product-banner-file');
+const productIconPreview = document.getElementById('product-icon-preview');
+const productBannerPreview = document.getElementById('product-banner-preview');
 const productSaveBtn = document.getElementById('product-save-btn');
 const productCancelBtn = document.getElementById('product-cancel-btn');
 const adminFormError = document.getElementById('admin-form-error');
@@ -35,6 +40,8 @@ let currentProduct = null;
 let currentUser = null;
 let editingProductId = null;
 let latestShareUrl = '';
+let selectedIconData = '';
+let selectedBannerData = '';
 
 function escapeHtml(text) {
     return String(text == null ? '' : text)
@@ -53,6 +60,27 @@ function formatDateTime(iso) {
 
 function canManageProducts() {
     return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('manage_download_products'));
+}
+
+function setPreviewImage(imgEl, src, fallbackAlt) {
+    imgEl.src = src || '';
+    imgEl.alt = fallbackAlt || '';
+    imgEl.style.display = src ? '' : 'none';
+}
+
+function toggleAdminForm(show) {
+    if (!canManageProducts()) return;
+    adminForm.style.display = show ? '' : 'none';
+    if (toggleCreateBtn) toggleCreateBtn.style.display = show ? 'none' : '';
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Không đọc được file ảnh.'));
+        reader.readAsDataURL(file);
+    });
 }
 
 function buildOptionLabel(build) {
@@ -96,6 +124,7 @@ function showList() {
     listView.style.display = '';
     pickView.style.display = 'none';
     currentProduct = null;
+    if (canManageProducts() && !editingProductId) toggleAdminForm(false);
     history.replaceState({ view: 'list' }, '', '/download');
     document.title = 'Tạo link tải — Share IPA';
 }
@@ -106,8 +135,15 @@ function resetAdminForm() {
     productNameInput.value = '';
     productIosInput.value = '';
     productAndroidInput.value = '';
+    productIconFileInput.value = '';
+    productBannerFileInput.value = '';
+    selectedIconData = '';
+    selectedBannerData = '';
+    setPreviewImage(productIconPreview, '', '');
+    setPreviewImage(productBannerPreview, '', '');
     productCancelBtn.style.display = 'none';
     adminFormError.textContent = '';
+    toggleAdminForm(false);
 }
 
 function startEditProduct(product) {
@@ -116,8 +152,15 @@ function startEditProduct(product) {
     productNameInput.value = product.name || '';
     productIosInput.value = product.iosBundleId || '';
     productAndroidInput.value = product.androidBundleId || '';
+    productIconFileInput.value = '';
+    productBannerFileInput.value = '';
+    selectedIconData = product.icon || '';
+    selectedBannerData = product.banner || '';
+    setPreviewImage(productIconPreview, selectedIconData, product.name || 'icon');
+    setPreviewImage(productBannerPreview, selectedBannerData, product.name || 'banner');
     productCancelBtn.style.display = '';
     adminFormError.textContent = '';
+    toggleAdminForm(true);
     adminForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -139,8 +182,11 @@ function renderProductList() {
         const mainBtn = document.createElement('button');
         mainBtn.type = 'button';
         mainBtn.className = 'dl-app-card';
+        const iconMarkup = product.icon
+            ? `<img src="${escapeHtml(product.icon)}" alt="" class="dl-app-card-icon">`
+            : `<div class="dl-app-card-icon dl-app-card-icon-text">${escapeHtml((product.name || '?').slice(0, 1).toUpperCase())}</div>`;
         mainBtn.innerHTML = `
-            <div class="dl-app-card-icon dl-app-card-icon-text">${escapeHtml((product.name || '?').slice(0, 1).toUpperCase())}</div>
+            ${iconMarkup}
             <div class="dl-app-card-info">
                 <h4>${escapeHtml(product.name)}</h4>
                 <p>${product.iosBundleId ? 'iOS' : '—'}${product.androidBundleId ? ' · Android' : ''}</p>
@@ -262,7 +308,7 @@ async function showPick(productId) {
         if (!res.ok || !data.success) throw new Error(data.message || 'Không tải được mục download.');
 
         currentProduct = data.product;
-        pickIcon.src = data.icon || FALLBACK_ICON;
+        pickIcon.src = currentProduct.icon || data.icon || FALLBACK_ICON;
         pickName.textContent = currentProduct.name;
         pickSub.textContent = [
             currentProduct.iosBundleId || null,
@@ -292,6 +338,8 @@ async function saveProduct() {
         name: productNameInput.value.trim(),
         iosBundleId: productIosInput.value.trim(),
         androidBundleId: productAndroidInput.value.trim(),
+        icon: selectedIconData || null,
+        banner: selectedBannerData || null,
     };
     if (!payload.name) {
         adminFormError.textContent = 'Nhập tên mục download.';
@@ -373,7 +421,7 @@ async function init() {
         }
 
         if (canManageProducts()) {
-            adminForm.style.display = '';
+            toggleCreateBtn.style.display = '';
             listSub.textContent = 'Admin tạo mục (tên + bundle). Tester chọn mục, gắn bản build và lưu link gửi đối tác.';
         }
 
@@ -395,9 +443,35 @@ async function init() {
 }
 
 pickBack.addEventListener('click', showList);
+toggleCreateBtn.addEventListener('click', () => {
+    resetAdminForm();
+    toggleAdminForm(true);
+});
 productSaveBtn.addEventListener('click', saveProduct);
 productCancelBtn.addEventListener('click', resetAdminForm);
 saveShareBtn.addEventListener('click', saveShare);
+
+productIconFileInput.addEventListener('change', async () => {
+    const file = productIconFileInput.files && productIconFileInput.files[0];
+    if (!file) return;
+    try {
+        selectedIconData = await readFileAsDataUrl(file);
+        setPreviewImage(productIconPreview, selectedIconData, 'icon');
+    } catch (err) {
+        adminFormError.textContent = err.message;
+    }
+});
+
+productBannerFileInput.addEventListener('change', async () => {
+    const file = productBannerFileInput.files && productBannerFileInput.files[0];
+    if (!file) return;
+    try {
+        selectedBannerData = await readFileAsDataUrl(file);
+        setPreviewImage(productBannerPreview, selectedBannerData, 'banner');
+    } catch (err) {
+        adminFormError.textContent = err.message;
+    }
+});
 
 copyShareBtn.addEventListener('click', async () => {
     if (!latestShareUrl) return;

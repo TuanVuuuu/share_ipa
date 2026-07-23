@@ -1209,6 +1209,17 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     margin: 0 auto;
     padding: 0 16px 32px;
 }
+.dl-partner-banner {
+    padding-top: 18px;
+}
+.dl-partner-banner img {
+    width: 100%;
+    display: block;
+    border-radius: 18px;
+    object-fit: cover;
+    aspect-ratio: 16 / 8;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+}
 .dl-partner-hero {
     padding: 28px 8px 20px;
     text-align: center;
@@ -1374,6 +1385,22 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 .dl-admin-form h3 {
     margin: 0 0 12px;
     font-size: 16px;
+}
+.dl-upload-preview,
+.dl-banner-preview {
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid #ececef;
+    background: #fff;
+    object-fit: cover;
+}
+.dl-upload-preview {
+    max-width: 160px;
+    aspect-ratio: 1 / 1;
+}
+.dl-banner-preview {
+    max-width: 100%;
+    aspect-ratio: 16 / 7;
 }
 .dl-admin-actions {
     display: flex;

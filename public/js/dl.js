@@ -3,6 +3,8 @@ const dlContent = document.getElementById('dl-content');
 const dlError = document.getElementById('dl-error');
 const dlErrorText = document.getElementById('dl-error-text');
 const dlAppName = document.getElementById('dl-app-name');
+const dlBanner = document.getElementById('dl-banner');
+const dlBannerImage = document.getElementById('dl-banner-image');
 const dlQr = document.getElementById('dl-qr');
 const dlVersion = document.getElementById('dl-version');
 const dlPlatformBadge = document.getElementById('dl-platform-badge');
@@ -122,6 +124,7 @@ async function init() {
     let iosId = (params.get('ios') || '').trim();
     let androidId = (params.get('android') || '').trim();
     let productTitle = '';
+    let productBanner = '';
 
     if (shareId) {
         try {
@@ -133,6 +136,7 @@ async function init() {
             iosId = data.item.iosBuildId || '';
             androidId = data.item.androidBuildId || '';
             productTitle = data.item.productName || '';
+            productBanner = data.item.productBanner || '';
         } catch (err) {
             showError(err.message || 'Không tải được link chia sẻ.');
             dlAppName.textContent = 'Share IPA';
@@ -183,6 +187,13 @@ async function init() {
         const fallbackName = (builds.ios || builds.android).appName || 'Ứng dụng';
         dlAppName.textContent = productTitle || fallbackName;
         document.title = `${productTitle || fallbackName} — Share IPA`;
+        if (productBanner) {
+            dlBannerImage.src = productBanner;
+            dlBannerImage.alt = productTitle || fallbackName;
+            dlBanner.style.display = '';
+        } else {
+            dlBanner.style.display = 'none';
+        }
 
         stopLoading();
         setActiveTab(initial);

@@ -561,6 +561,8 @@ function publicProduct(p) {
         name: p.name,
         iosBundleId: p.iosBundleId || '',
         androidBundleId: p.androidBundleId || '',
+        icon: p.icon || null,
+        banner: p.banner || null,
         createdAt: p.createdAt || null,
         createdBy: p.createdBy || null,
         updatedAt: p.updatedAt || null,
@@ -572,6 +574,8 @@ function publicShare(s) {
         id: s.id,
         productId: s.productId,
         productName: s.productName || '',
+        productIcon: s.productIcon || null,
+        productBanner: s.productBanner || null,
         iosBuildId: s.iosBuildId || null,
         androidBuildId: s.androidBuildId || null,
         iosVersion: s.iosVersion || null,
@@ -724,6 +728,8 @@ app.post('/api/download-products', requirePermission('manage_download_products')
         const name = (req.body?.name || '').toString().trim();
         const iosBundleId = (req.body?.iosBundleId || '').toString().trim();
         const androidBundleId = (req.body?.androidBundleId || '').toString().trim();
+        const icon = (req.body?.icon || '').toString().trim() || null;
+        const banner = (req.body?.banner || '').toString().trim() || null;
         if (!name) {
             return res.status(400).json({ success: false, message: 'Thiếu tên mục download.' });
         }
@@ -738,6 +744,8 @@ app.post('/api/download-products', requirePermission('manage_download_products')
             name,
             iosBundleId,
             androidBundleId,
+            icon,
+            banner,
             createdAt: now,
             updatedAt: now,
             createdBy: req.currentUser.username,
@@ -760,6 +768,8 @@ app.post('/api/download-products/update', requirePermission('manage_download_pro
         const name = (req.body?.name || '').toString().trim();
         const iosBundleId = (req.body?.iosBundleId || '').toString().trim();
         const androidBundleId = (req.body?.androidBundleId || '').toString().trim();
+        const icon = (req.body?.icon || '').toString().trim() || null;
+        const banner = (req.body?.banner || '').toString().trim() || null;
         if (!id) return res.status(400).json({ success: false, message: 'Thiếu id mục download.' });
         if (!name) return res.status(400).json({ success: false, message: 'Thiếu tên mục download.' });
         if (!iosBundleId && !androidBundleId) {
@@ -775,6 +785,8 @@ app.post('/api/download-products/update', requirePermission('manage_download_pro
             name,
             iosBundleId,
             androidBundleId,
+            icon,
+            banner,
             updatedAt: new Date().toISOString(),
         };
         await saveJsonArrayFile(DOWNLOAD_PRODUCTS_PATH, list, `update download product ${name}`, sha);
@@ -917,6 +929,8 @@ app.post('/api/download-shares', requirePermission('create_download_link'), asyn
             id: makeShortId(),
             productId: product.id,
             productName: product.name,
+            productIcon: product.icon || null,
+            productBanner: product.banner || null,
             iosBuildId,
             androidBuildId,
             iosVersion: iosBuild ? iosBuild.version : null,

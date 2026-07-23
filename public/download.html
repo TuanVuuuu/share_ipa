@@ -17,6 +17,7 @@
     <div id="list-view">
         <div class="catalog-head">
             <h2>Mục download</h2>
+            <button type="button" class="btn" id="toggle-create-btn" style="display:none;">Tạo danh mục</button>
         </div>
         <p class="catalog-sub" id="list-sub">Chọn mục do admin tạo, gắn bản iOS/Android rồi lưu link gửi đối tác.</p>
 
@@ -34,6 +35,16 @@
                 <label class="dl-field">
                     <span class="dl-field-label"><span class="build-tag build-tag-android">Android</span> Package name</span>
                     <input type="text" id="product-android-bundle" class="dl-select" placeholder="com.example.app" autocomplete="off">
+                </label>
+                <label class="dl-field">
+                    <span class="dl-field-label">Icon app</span>
+                    <input type="file" id="product-icon-file" class="dl-select" accept="image/*">
+                    <img src="" alt="" id="product-icon-preview" class="dl-upload-preview" style="display:none;">
+                </label>
+                <label class="dl-field">
+                    <span class="dl-field-label">Banner app (optional)</span>
+                    <input type="file" id="product-banner-file" class="dl-select" accept="image/*">
+                    <img src="" alt="" id="product-banner-preview" class="dl-banner-preview" style="display:none;">
                 </label>
             </div>
             <div class="dl-admin-actions">
