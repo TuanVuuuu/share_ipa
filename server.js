@@ -18,7 +18,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '11';
+const ASSET_VERSION = process.env.ASSET_VERSION || '13';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -286,6 +286,59 @@ app.get('/install', async (req, res) => {
     sendHtmlWithOg(res, 'install.html', og);
 });
 
+// Trang nội bộ: chọn bản iOS/Android rồi tạo link share cho đối tác
+app.get('/download', (req, res) => {
+    const user = getSessionUser(req);
+    if (!user) {
+        return res.redirect(`/?next=${encodeURIComponent('/download')}`);
+    }
+    if (!auth.hasPermission(user, 'create_download_link')) {
+        return res.redirect('/');
+    }
+    const og = buildOgMeta({
+        title: 'Tạo link tải — Share IPA',
+        description: 'Chọn bản iOS và Android để tạo link chia sẻ cho tester đối tác.',
+        url: `${PUBLIC_BASE_URL}/download`,
+    });
+    sendHtmlWithOg(res, 'download.html', og);
+});
+
+// Trang public đối tác: /dl?ios=<id>&android=<id>
+app.get('/dl', async (req, res) => {
+    const iosId = (req.query.ios || '').toString().trim();
+    const androidId = (req.query.android || '').toString().trim();
+    const qs = new URLSearchParams();
+    if (iosId) qs.set('ios', iosId);
+    if (androidId) qs.set('android', androidId);
+    const pageUrl = qs.toString()
+        ? `${PUBLIC_BASE_URL}/dl?${qs.toString()}`
+        : `${PUBLIC_BASE_URL}/dl`;
+
+    let og = buildOgMeta({
+        title: 'Tải ứng dụng — Share IPA',
+        description: 'Quét mã QR hoặc nhấn nút để cài đặt bản build đã được chia sẻ.',
+        url: pageUrl,
+    });
+
+    const firstId = iosId || androidId;
+    if (firstId) {
+        try {
+            const list = await readCatalog();
+            const record = list.find(item => item.id === firstId)
+                || (androidId && androidId !== firstId ? list.find(item => item.id === androidId) : null);
+            if (record) {
+                og = buildOgMeta({
+                    title: `${record.appName} — Share IPA`,
+                    description: `Cài đặt ${record.appName} · chọn nền tảng iOS hoặc Android`,
+                    image: record.icon || undefined,
+                    url: pageUrl,
+                });
+            }
+        } catch (_) { /* giữ OG mặc định */ }
+    }
+    sendHtmlWithOg(res, 'dl.html', og);
+});
+
 // Trang chi tiết ứng dụng theo platform: /ios/app?bundle=... | /android/app?bundle=...
 function buildAppDetailPath(platform, bundleId) {
     const p = platform === 'android' ? 'android' : 'ios';
@@ -373,8 +426,8 @@ app.post('/api/logout', (req, res) => {
 app.use('/api/upload-secure', requirePermission('upload_build'));
 app.use('/api/upload-chunk', requirePermission('upload_build'));
 app.use('/api/upload-finalize', requirePermission('upload_build'));
-app.use('/api/logs', requireAuth);
-app.use('/api/catalog', requireAuth);
+app.use('/api/logs', requirePermission('upload_build'));
+app.use('/api/catalog', requirePermission('view_catalog'));
 
 const systemLogs = [];
 let logClients = [];

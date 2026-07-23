@@ -62,6 +62,14 @@ function canDeleteBuild() {
     return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('delete_build'));
 }
 
+function canUploadBuild() {
+    return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('upload_build'));
+}
+
+function canCreateDownloadLink() {
+    return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('create_download_link'));
+}
+
 // Kết nối nhận log real-time từ máy Mac (chỉ khi đã đăng nhập)
 let logsReconnectTimer = null;
 
@@ -92,6 +100,21 @@ function connectLogs() {
     };
 }
 
+function getSafeNextPath(raw) {
+    const s = (raw || '').toString().trim();
+    if (!s.startsWith('/') || s.startsWith('//') || s.includes('\\')) return null;
+    return s;
+}
+
+function redirectIfNextParam() {
+    const next = getSafeNextPath(new URLSearchParams(window.location.search).get('next'));
+    if (next) {
+        window.location.href = next;
+        return true;
+    }
+    return false;
+}
+
 function applyAuthState(authenticated) {
     isAuthenticated = authenticated;
     if (!authenticated) currentUser = null;
@@ -101,13 +124,32 @@ function applyAuthState(authenticated) {
         authUsernameLabel.innerText = currentUser.username;
         authRoleBadge.innerText = currentUser.role;
     }
-    protectedAreas.forEach(el => el.classList.toggle('locked', !authenticated));
+
+    const canUpload = authenticated && canUploadBuild();
+    const canDownloadLink = authenticated && canCreateDownloadLink();
+
+    protectedAreas.forEach(el => {
+        el.classList.toggle('locked', !canUpload);
+        el.style.display = canUpload ? '' : 'none';
+    });
+
+    const downloadPageLink = document.getElementById('download-page-link');
+    if (downloadPageLink) {
+        downloadPageLink.style.display = canDownloadLink ? '' : 'none';
+    }
 
     catalogContainer.style.display = authenticated ? '' : 'none';
-    logsContainer.style.display = authenticated ? '' : 'none';
+    logsContainer.style.display = canUpload ? '' : 'none';
 
     if (authenticated) {
-        connectLogs();
+        if (canUpload) connectLogs();
+        else {
+            clearTimeout(logsReconnectTimer);
+            if (logsSource) {
+                logsSource.close();
+                logsSource = null;
+            }
+        }
         loadCatalog();
     } else {
         setCatalogLoading(false);
@@ -417,6 +459,7 @@ async function checkAuthStatus() {
             ? { username: data.username, role: data.role, permissions: data.permissions || [] }
             : null;
         applyAuthState(!!data.authenticated);
+        if (data.authenticated) redirectIfNextParam();
     } catch (err) {
         currentUser = null;
         applyAuthState(false);
@@ -445,6 +488,7 @@ authForm.addEventListener('submit', async (e) => {
         }
         authForm.reset();
         currentUser = { username: data.username, role: data.role, permissions: data.permissions || [] };
+        if (redirectIfNextParam()) return;
         applyAuthState(true);
     } catch (err) {
         authError.textContent = err.message;

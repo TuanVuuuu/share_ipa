@@ -9,10 +9,13 @@ const path = require('path');
 const USERS_CONFIG_PATH = path.join(__dirname, 'users.json');
 const SESSION_SECRET = process.env.SESSION_SECRET || 'share-ipa-local-secret-change-me';
 
-// Ma trận quyền theo role. 'upload_build': được đẩy bản build. 'delete_build': được xóa bản build.
+// Ma trận quyền theo role.
+// upload_build: đẩy bản build | delete_build: xóa bản build
+// view_catalog: xem danh mục | create_download_link: tạo link /download cho đối tác
 const ROLE_PERMISSIONS = {
-    admin: ['upload_build', 'delete_build'],
-    dev: ['upload_build'],
+    admin: ['upload_build', 'delete_build', 'view_catalog', 'create_download_link'],
+    dev: ['upload_build', 'view_catalog', 'create_download_link'],
+    tester: ['view_catalog', 'create_download_link'],
 };
 
 function loadUsers() {

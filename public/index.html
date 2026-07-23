@@ -35,7 +35,10 @@
 
     <div class="auth-status" id="auth-status" style="display: none;">
         <span>✅ Đã đăng nhập: <b id="auth-username-label"></b> <span class="auth-role-badge" id="auth-role-badge"></span></span>
-        <button type="button" class="btn secondary" id="logout-btn">Đăng xuất</button>
+        <div class="auth-status-actions">
+            <a href="/download" class="btn secondary auth-nav-link" id="download-page-link">Download</a>
+            <button type="button" class="btn secondary" id="logout-btn">Đăng xuất</button>
+        </div>
     </div>
 
     <div id="drop-zone">

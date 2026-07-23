@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tạo link tải — Share IPA</title>
+    <!-- __OG_META__ -->
+    <link rel="icon" type="image/png" href="/ic_launcher_web.png">
+    <link rel="apple-touch-icon" href="/ic_launcher_web.png">
+    <link rel="stylesheet" href="/css/styles.css?v=__V__">
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+</head>
+<body>
+
+<div class="container dl-page" id="download-page">
+    <a href="/" class="catalog-back"><svg class="catalog-back-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20h14v-9.5"/></svg>Trang chủ</a>
+
+    <div id="list-view">
+        <div class="catalog-head">
+            <h2>Tạo link tải</h2>
+        </div>
+        <p class="catalog-sub">Chọn ứng dụng, gắn 1 bản iOS và 1 bản Android, rồi gửi link cho đối tác.</p>
+        <div id="app-list" class="dl-app-list is-loading"></div>
+        <div id="list-empty" class="catalog-empty" style="display:none;">Chưa có ứng dụng trong danh mục.</div>
+    </div>
+
+    <div id="pick-view" style="display:none;">
+        <button type="button" class="catalog-back" id="pick-back">← Quay lại danh sách</button>
+        <div class="dl-pick-header">
+            <img src="" alt="" class="dl-pick-icon" id="pick-icon">
+            <div>
+                <h2 id="pick-name">App</h2>
+                <p class="catalog-sub" id="pick-sub">Chọn bản build để chia sẻ</p>
+            </div>
+        </div>
+
+        <div class="dl-pick-fields">
+            <label class="dl-field">
+                <span class="dl-field-label"><span class="build-tag build-tag-ios">iOS</span> Phiên bản</span>
+                <select id="ios-select" class="dl-select"></select>
+                <p class="dl-field-hint" id="ios-hint"></p>
+            </label>
+            <label class="dl-field">
+                <span class="dl-field-label"><span class="build-tag build-tag-android">Android</span> Phiên bản</span>
+                <select id="android-select" class="dl-select"></select>
+                <p class="dl-field-hint" id="android-hint"></p>
+            </label>
+        </div>
+
+        <div class="dl-share-box">
+            <label for="share-link-input">Link gửi đối tác</label>
+            <div class="url-box">
+                <input type="text" id="share-link-input" readonly value="">
+                <button type="button" class="btn secondary" id="copy-share-btn">Sao chép</button>
+            </div>
+            <a href="#" id="open-share-btn" class="btn" target="_blank" rel="noopener">Mở trang đối tác</a>
+        </div>
+    </div>
+</div>
+
+<script src="/js/download.js?v=__V__"></script>
+</body>
+</html>

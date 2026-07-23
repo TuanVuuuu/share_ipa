@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tải ứng dụng — Share IPA</title>
+    <!-- __OG_META__ -->
+    <link rel="icon" type="image/png" href="/ic_launcher_web.png">
+    <link rel="apple-touch-icon" href="/ic_launcher_web.png">
+    <link rel="stylesheet" href="/css/styles.css?v=__V__">
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+</head>
+<body class="dl-partner-body">
+
+<div class="dl-partner" id="dl-zone">
+    <div class="dl-partner-hero">
+        <div class="dl-partner-brand">Share IPA</div>
+        <h1 class="dl-partner-title" id="dl-app-name">Đang tải...</h1>
+        <div class="dl-tabs" id="dl-tabs" role="tablist">
+            <button type="button" class="dl-tab is-active" data-platform="ios" id="tab-ios" role="tab" aria-selected="true">IOS</button>
+            <button type="button" class="dl-tab" data-platform="android" id="tab-android" role="tab" aria-selected="false">ANDROID</button>
+        </div>
+    </div>
+
+    <div class="dl-partner-card is-loading" id="dl-card">
+        <div class="dl-card-skeleton" id="dl-skeleton" aria-hidden="true">
+            <div class="sk sk-line sk-line-sm"></div>
+            <div class="sk sk-qr"></div>
+            <div class="sk sk-line sk-line-lg"></div>
+        </div>
+
+        <div class="dl-card-content" id="dl-content">
+            <p class="dl-scan-label">Quét để tải</p>
+            <div class="dl-qr" id="dl-qr"></div>
+            <div class="dl-version-row">
+                <span class="dl-version-text" id="dl-version">—</span>
+                <span class="build-tag" id="dl-platform-badge">ios</span>
+            </div>
+            <a href="#" class="btn dl-install-btn" id="dl-install-btn">Cài đặt ngay</a>
+            <div class="dl-howto" id="dl-howto" style="display:none;">
+                <h3>Cách cài đặt iOS</h3>
+                <p>Settings → General → VPN &amp; Device Management → Trust chứng chỉ nhà phát triển.</p>
+            </div>
+            <p class="qr-hint" id="dl-hint"></p>
+        </div>
+
+        <div class="dl-card-error" id="dl-error" style="display:none;">
+            <p id="dl-error-text">Không tải được thông tin bản build.</p>
+        </div>
+    </div>
+</div>
+
+<script src="/js/dl.js?v=__V__"></script>
+</body>
+</html>

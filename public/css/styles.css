@@ -1055,3 +1055,311 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 .install-devices {
     margin-top: 10px;
 }
+
+/* ─── /download — tạo link share ─── */
+.dl-page .catalog-back {
+    margin-bottom: 12px;
+}
+.dl-app-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 80px;
+}
+.dl-app-list.is-loading::after {
+    content: 'Đang tải...';
+    display: block;
+    text-align: center;
+    color: #86868b;
+    padding: 24px 0;
+    font-size: 14px;
+}
+.dl-app-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid #ececef;
+    border-radius: 12px;
+    background: #fafafa;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.dl-app-card:hover {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+}
+.dl-app-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #eee;
+}
+.dl-app-card-info {
+    flex: 1;
+    min-width: 0;
+}
+.dl-app-card-info h4 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    font-weight: 600;
+}
+.dl-app-card-info p {
+    margin: 0;
+    font-size: 13px;
+    color: #86868b;
+}
+.dl-app-card-arrow {
+    font-size: 22px;
+    color: #c7c7cc;
+    flex-shrink: 0;
+}
+.dl-pick-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 8px 0 20px;
+}
+.dl-pick-header h2 {
+    text-align: left;
+    margin: 0 0 4px;
+    font-size: 22px;
+}
+.dl-pick-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    object-fit: cover;
+    background: #eee;
+    flex-shrink: 0;
+}
+.dl-pick-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 22px;
+}
+.dl-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.dl-field-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+}
+.dl-field-hint {
+    margin: 0;
+    font-size: 12px;
+    color: #86868b;
+}
+.dl-select {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid #d2d2d7;
+    border-radius: 10px;
+    font-size: 15px;
+    background: #fff;
+    color: var(--text);
+}
+.dl-select:disabled {
+    background: #f5f5f7;
+    color: #86868b;
+}
+.dl-share-box {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #ececef;
+}
+.dl-share-box > label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #4c4c52;
+}
+.dl-share-box .btn {
+    width: 100%;
+    text-align: center;
+    text-decoration: none;
+}
+.dl-share-box .btn.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+/* ─── /dl — trang đối tác kiểu MoMo ─── */
+.dl-partner-body {
+    padding: 0;
+    background: linear-gradient(180deg, #1a1a1e 0%, #2a2a30 42%, var(--bg) 42%);
+    min-height: 100vh;
+}
+.dl-partner {
+    width: 100%;
+    max-width: 440px;
+    margin: 0 auto;
+    padding: 0 16px 32px;
+}
+.dl-partner-hero {
+    padding: 28px 8px 20px;
+    text-align: center;
+    color: #fff;
+}
+.dl-partner-brand {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.65);
+    margin-bottom: 10px;
+}
+.dl-partner-title {
+    margin: 0 0 22px;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.25;
+    color: #fff;
+}
+.dl-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 28px;
+}
+.dl-tab {
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 6px 4px 10px;
+    cursor: pointer;
+    position: relative;
+}
+.dl-tab.is-active {
+    color: var(--primary);
+}
+.dl-tab.is-active::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--primary);
+}
+.dl-partner-card {
+    background: var(--card);
+    border-radius: 20px 20px 16px 16px;
+    padding: 28px 22px 24px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    min-height: 360px;
+}
+.dl-card-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 12px;
+}
+.dl-partner-card.is-loading .dl-card-content,
+.dl-partner-card.is-loading .dl-card-error {
+    display: none;
+}
+.dl-card-skeleton {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 0;
+}
+.dl-partner-card.is-loading .dl-card-skeleton {
+    display: flex;
+}
+.sk-qr {
+    width: 200px;
+    height: 200px;
+    border-radius: 12px;
+}
+.dl-scan-label {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--primary);
+}
+.dl-qr {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 220px;
+}
+.dl-qr img {
+    width: 220px;
+    height: 220px;
+    border-radius: 8px;
+}
+.dl-version-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.dl-version-text {
+    font-size: 16px;
+    font-weight: 600;
+}
+.dl-install-btn {
+    width: 100%;
+    max-width: 280px;
+    text-align: center;
+    text-decoration: none;
+    margin-top: 4px;
+}
+.dl-howto {
+    width: 100%;
+    margin-top: 8px;
+    padding-top: 14px;
+    border-top: 1px solid #ececef;
+    text-align: left;
+}
+.dl-howto h3 {
+    margin: 0 0 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--primary);
+}
+.dl-howto p {
+    margin: 0;
+    font-size: 13px;
+    color: #4c4c52;
+    line-height: 1.45;
+}
+.dl-card-error {
+    text-align: center;
+    padding: 40px 12px;
+    color: #86868b;
+    font-size: 15px;
+}
+
+.auth-status-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.auth-nav-link {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+}
