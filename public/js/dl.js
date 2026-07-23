@@ -5,6 +5,7 @@ const dlErrorText = document.getElementById('dl-error-text');
 const dlAppName = document.getElementById('dl-app-name');
 const dlBanner = document.getElementById('dl-banner');
 const dlBannerImage = document.getElementById('dl-banner-image');
+const dlTop = document.getElementById('dl-top');
 const dlQr = document.getElementById('dl-qr');
 const dlVersion = document.getElementById('dl-version');
 const dlPlatformBadge = document.getElementById('dl-platform-badge');
@@ -16,6 +17,7 @@ const tabAndroid = document.getElementById('tab-android');
 
 const builds = { ios: null, android: null };
 let activePlatform = null;
+let categoryName = '';
 
 function isAndroidUa() {
     return /Android/i.test(navigator.userAgent || '');
@@ -23,6 +25,13 @@ function isAndroidUa() {
 
 function isIosUa() {
     return /iPad|iPhone|iPod/i.test(navigator.userAgent || '');
+}
+
+function setCategoryTitle(name) {
+    categoryName = (name || '').trim();
+    const title = categoryName || 'Tải ứng dụng';
+    dlAppName.textContent = title;
+    document.title = title;
 }
 
 function stopLoading() {
@@ -80,8 +89,7 @@ function renderBuild(item) {
         return;
     }
 
-    dlAppName.textContent = item.appName || 'Ứng dụng';
-    document.title = `${item.appName || 'Ứng dụng'} — Share IPA`;
+    if (categoryName) setCategoryTitle(categoryName);
 
     const ver = item.version || '?';
     const bn = item.buildNumber != null ? ` (${item.buildNumber})` : '';
@@ -137,9 +145,10 @@ async function init() {
             androidId = data.item.androidBuildId || '';
             productTitle = data.item.productName || '';
             productBanner = data.item.productBanner || '';
+            setCategoryTitle(productTitle);
         } catch (err) {
             showError(err.message || 'Không tải được link chia sẻ.');
-            dlAppName.textContent = 'Share IPA';
+            setCategoryTitle('');
             tabIos.style.display = 'none';
             tabAndroid.style.display = 'none';
             return;
@@ -148,7 +157,7 @@ async function init() {
 
     if (!iosId && !androidId) {
         showError('Liên kết không hợp lệ. Thiếu thông tin bản build.');
-        dlAppName.textContent = 'Share IPA';
+        setCategoryTitle('');
         tabIos.style.display = 'none';
         tabAndroid.style.display = 'none';
         return;
@@ -184,23 +193,23 @@ async function init() {
             initial = 'android';
         }
 
-        const fallbackName = (builds.ios || builds.android).appName || 'Ứng dụng';
-        dlAppName.textContent = productTitle || fallbackName;
-        document.title = `${productTitle || fallbackName} — Share IPA`;
+        setCategoryTitle(productTitle);
         if (productBanner) {
             dlBannerImage.src = productBanner;
-            dlBannerImage.alt = productTitle || fallbackName;
-            dlBanner.style.display = '';
+            dlBannerImage.alt = productTitle || 'Banner';
+            dlBanner.hidden = false;
+            if (dlTop) dlTop.classList.add('has-banner');
         } else {
-            dlBanner.style.display = 'none';
+            dlBanner.hidden = true;
+            dlBannerImage.removeAttribute('src');
+            if (dlTop) dlTop.classList.remove('has-banner');
         }
 
         stopLoading();
         setActiveTab(initial);
-        if (productTitle) dlAppName.textContent = productTitle;
     } catch (err) {
         showError(err.message || 'Không tải được thông tin bản build.');
-        dlAppName.textContent = 'Share IPA';
+        setCategoryTitle(productTitle);
     }
 }
 

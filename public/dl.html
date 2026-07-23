@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tải ứng dụng — Share IPA</title>
+    <title>Tải ứng dụng</title>
     <!-- __OG_META__ -->
     <link rel="icon" type="image/png" href="/ic_launcher_web.png">
     <link rel="apple-touch-icon" href="/ic_launcher_web.png">
@@ -12,19 +12,20 @@
 </head>
 <body class="dl-partner-body">
 
-<div class="dl-partner" id="dl-zone">
-    <div class="dl-partner-banner" id="dl-banner" style="display:none;">
+<section class="dl-partner-top" id="dl-top">
+    <div class="dl-partner-banner" id="dl-banner" hidden>
         <img src="" alt="" id="dl-banner-image">
     </div>
     <div class="dl-partner-hero">
-        <div class="dl-partner-brand">Share IPA</div>
         <h1 class="dl-partner-title" id="dl-app-name">Đang tải...</h1>
         <div class="dl-tabs" id="dl-tabs" role="tablist">
             <button type="button" class="dl-tab is-active" data-platform="ios" id="tab-ios" role="tab" aria-selected="true">IOS</button>
             <button type="button" class="dl-tab" data-platform="android" id="tab-android" role="tab" aria-selected="false">ANDROID</button>
         </div>
     </div>
+</section>
 
+<div class="dl-partner" id="dl-zone">
     <div class="dl-partner-card is-loading" id="dl-card">
         <div class="dl-card-skeleton" id="dl-skeleton" aria-hidden="true">
             <div class="sk sk-line sk-line-sm"></div>
