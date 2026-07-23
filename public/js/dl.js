@@ -19,6 +19,7 @@ const tabAndroid = document.getElementById('tab-android');
 const builds = { ios: null, android: null };
 let activePlatform = null;
 let categoryName = '';
+let categoryIconUrl = '';
 
 function isAndroidUa() {
     return /Android/i.test(navigator.userAgent || '');
@@ -36,15 +37,15 @@ function setCategoryTitle(name) {
 }
 
 function setCategoryIcon(iconUrl, altText) {
-    const src = (iconUrl || '').trim();
-    if (!src || !dlAppIcon) {
+    categoryIconUrl = (iconUrl || '').trim();
+    if (!categoryIconUrl || !dlAppIcon) {
         if (dlAppIcon) {
             dlAppIcon.hidden = true;
             dlAppIcon.removeAttribute('src');
         }
         return;
     }
-    dlAppIcon.src = src;
+    dlAppIcon.src = categoryIconUrl;
     dlAppIcon.alt = altText || categoryName || 'App icon';
     dlAppIcon.hidden = false;
 }
@@ -62,25 +63,41 @@ function showError(message) {
 
 function renderQr(shareUrl, storedQr) {
     dlQr.innerHTML = '';
-    if (storedQr) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dl-qr-wrap';
+
+    // Dùng error correction H để vẫn quét được khi có logo giữa QR
+    if (shareUrl && typeof qrcode === 'function') {
+        const qr = qrcode(0, 'H');
+        qr.addData(shareUrl);
+        qr.make();
+        wrap.innerHTML = qr.createImgTag(6, 8);
+        const img = wrap.querySelector('img');
+        if (img) {
+            img.alt = 'QR code';
+            img.className = 'dl-qr-image';
+        }
+    } else if (storedQr) {
         const img = document.createElement('img');
         img.src = storedQr;
         img.alt = 'QR code';
-        dlQr.appendChild(img);
+        img.className = 'dl-qr-image';
+        wrap.appendChild(img);
+    } else {
         return;
     }
-    if (shareUrl && typeof qrcode === 'function') {
-        const qr = qrcode(0, 'M');
-        qr.addData(shareUrl);
-        qr.make();
-        dlQr.innerHTML = qr.createImgTag(6, 8);
-        const img = dlQr.querySelector('img');
-        if (img) {
-            img.alt = 'QR code';
-            img.style.width = '220px';
-            img.style.height = '220px';
-        }
+
+    if (categoryIconUrl) {
+        const logo = document.createElement('div');
+        logo.className = 'dl-qr-logo';
+        const logoImg = document.createElement('img');
+        logoImg.src = categoryIconUrl;
+        logoImg.alt = categoryName || 'icon';
+        logo.appendChild(logoImg);
+        wrap.appendChild(logo);
     }
+
+    dlQr.appendChild(wrap);
 }
 
 function setActiveTab(platform) {

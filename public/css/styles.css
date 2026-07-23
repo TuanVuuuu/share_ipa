@@ -1344,9 +1344,36 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     justify-content: center;
     min-height: 220px;
 }
-.dl-qr img {
+.dl-qr-wrap {
+    position: relative;
     width: 220px;
     height: 220px;
+}
+.dl-qr-image {
+    width: 220px;
+    height: 220px;
+    display: block;
+    border-radius: 8px;
+}
+.dl-qr-logo {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 46px;
+    height: 46px;
+    padding: 4px;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 0 0 4px #fff;
+    overflow: hidden;
+    pointer-events: none;
+}
+.dl-qr-logo img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
     border-radius: 8px;
 }
 .dl-version-row {
