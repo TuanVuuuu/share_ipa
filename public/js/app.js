@@ -349,13 +349,29 @@ function setCatalogLoading(loading) {
     if (loading) catalogEmpty.style.display = 'none';
 }
 
+function ensureDownloadProductsSkeleton(listEl) {
+    let sk = listEl.querySelector('.dl-list-skeleton');
+    if (sk) return sk;
+    sk = document.createElement('div');
+    sk.className = 'dl-list-skeleton';
+    sk.setAttribute('aria-hidden', 'true');
+    sk.innerHTML = '<div class="sk dl-list-sk-card"></div><div class="sk dl-list-sk-card"></div><div class="sk dl-list-sk-card"></div>';
+    listEl.appendChild(sk);
+    return sk;
+}
+
+function clearDownloadProductCards(listEl) {
+    listEl.querySelectorAll('.dl-app-card').forEach((el) => el.remove());
+}
+
 async function loadDownloadProductsHome() {
     const listEl = document.getElementById('download-products-list');
     const emptyEl = document.getElementById('download-products-empty');
     const subEl = document.getElementById('download-products-sub');
     if (!listEl || !emptyEl) return;
 
-    listEl.innerHTML = '';
+    clearDownloadProductCards(listEl);
+    ensureDownloadProductsSkeleton(listEl);
     listEl.classList.add('is-loading');
     emptyEl.style.display = 'none';
     try {
@@ -364,6 +380,7 @@ async function loadDownloadProductsHome() {
         if (!res.ok || !data.success) throw new Error(data.message || 'Không tải được mục download.');
         const items = data.items || [];
         listEl.classList.remove('is-loading');
+        clearDownloadProductCards(listEl);
         if (!items.length) {
             emptyEl.style.display = 'block';
             emptyEl.textContent = 'Chưa có mục download. Admin hãy tạo tại trang Download.';
@@ -396,6 +413,7 @@ async function loadDownloadProductsHome() {
         }
     } catch (err) {
         listEl.classList.remove('is-loading');
+        clearDownloadProductCards(listEl);
         emptyEl.style.display = 'block';
         emptyEl.textContent = err.message || 'Lỗi tải mục download.';
     }
@@ -421,68 +439,46 @@ async function loadCatalog() {
     }
 }
 
-// Gom nhóm theo platform + bundleId: mỗi nhóm là 1 "thư mục app" kèm toàn bộ bản build
-function groupByBundle(items) {
-    const map = new Map();
-    items.forEach(item => {
-        const platform = item.platform || 'ios';
-        const key = `${platform}:${item.bundleId || item.id}`;
-        if (!map.has(key)) map.set(key, { key, platform, builds: [] });
-        map.get(key).builds.push(item);
-    });
+const HOME_CATALOG_PREVIEW_LIMIT = 4;
 
-    const groups = Array.from(map.values());
-    groups.forEach(g => {
-        g.builds.sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
-        g.latest = g.builds[0];
-        g.count = g.builds.length;
-    });
-    return groups.sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
+function groupByBundle(items) {
+    return CatalogDetail.groupByBundle(items);
 }
 
 function createAppCard(group) {
-    const { latest, count, platform } = group;
-    const platformLabel = platform === 'android' ? 'Android' : 'iOS';
-    const platformClass = platform === 'android' ? 'build-tag-android' : 'build-tag-ios';
-    const card = document.createElement('div');
-    card.className = 'app-card folder-card';
-    card.innerHTML = `
-        <div class="app-card-top">
-            <img src="${escapeHtml(latest.icon || FALLBACK_ICON)}" alt="icon" onerror="this.src='${FALLBACK_ICON}'">
-            <div class="app-card-info">
-                <h4>${escapeHtml(latest.appName)}</h4>
-                <p class="app-card-bundle">${escapeHtml(latest.bundleId)}</p>
-            </div>
-        </div>
-        <div class="app-card-meta">
-            <span class="build-tag ${platformClass}">${platformLabel}</span>
-            <span class="badge">📁 ${count} bản build</span>
-            <span>🆕 v${escapeHtml(latest.version)} (Build ${escapeHtml(latest.buildNumber)})</span>
-            <span>🕒 ${escapeHtml(formatDateTime(latest.uploadedAt))}</span>
-        </div>
-        <div class="app-card-actions">
-            <button type="button" class="btn view-all-btn">Xem tất cả</button>
-        </div>
-    `;
-    card.addEventListener('click', () => navigateToAppDetail(latest.bundleId, platform));
-    return card;
+    return CatalogDetail.createAppFolderCard(group, (g) => {
+        navigateToAppDetail(g.latest.bundleId, g.platform);
+    });
 }
 
 function appendCatalogSection(container, title, platform, groups) {
     if (!groups.length) return;
     const section = document.createElement('section');
     section.className = `catalog-section catalog-section-${platform}`;
-    section.innerHTML = `
-        <div class="catalog-section-head">
-            <h3 class="catalog-section-title">
-                <span class="build-tag ${platform === 'android' ? 'build-tag-android' : 'build-tag-ios'}">${title}</span>
-                <span class="catalog-section-count">${groups.length} ứng dụng</span>
-            </h3>
-        </div>
+
+    const head = document.createElement('div');
+    head.className = 'catalog-section-head';
+    head.innerHTML = `
+        <h3 class="catalog-section-title">
+            <span class="build-tag ${platform === 'android' ? 'build-tag-android' : 'build-tag-ios'}">${title}</span>
+            <span class="catalog-section-count">${groups.length} ứng dụng</span>
+        </h3>
     `;
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.className = 'catalog-section-more';
+    moreBtn.textContent = 'Xem tất cả';
+    moreBtn.addEventListener('click', () => {
+        window.location.href = CatalogDetail.buildPlatformListPath(platform);
+    });
+    head.appendChild(moreBtn);
+    section.appendChild(head);
+
     const grid = document.createElement('div');
     grid.className = 'catalog-grid';
-    groups.forEach((group) => grid.appendChild(createAppCard(group)));
+    groups.slice(0, HOME_CATALOG_PREVIEW_LIMIT).forEach((group) => {
+        grid.appendChild(createAppCard(group));
+    });
     section.appendChild(grid);
     container.appendChild(section);
 }

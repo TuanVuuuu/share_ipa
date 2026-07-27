@@ -20,7 +20,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '23';
+const ASSET_VERSION = process.env.ASSET_VERSION || '25';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -399,6 +399,28 @@ app.get('/dl', async (req, res) => {
     }
     sendHtmlWithOg(res, 'dl.html', og);
 });
+
+// Trang danh sách app theo platform: /ios | /android
+function servePlatformCatalogPage(req, res, platform) {
+    const user = getSessionUser(req);
+    const listPath = platform === 'android' ? '/android' : '/ios';
+    if (!user) {
+        return res.redirect(`/?next=${encodeURIComponent(listPath)}`);
+    }
+    if (!auth.hasPermission(user, 'view_catalog')) {
+        return res.redirect('/');
+    }
+    const platformLabel = platform === 'android' ? 'Android' : 'iOS';
+    const og = buildOgMeta({
+        title: `Ứng dụng ${platformLabel} — Share IPA`,
+        description: `Danh sách toàn bộ ứng dụng ${platformLabel} trong danh mục.`,
+        url: `${PUBLIC_BASE_URL}${listPath}`,
+    });
+    sendHtmlWithOg(res, 'catalog-platform.html', og);
+}
+
+app.get('/ios', (req, res) => servePlatformCatalogPage(req, res, 'ios'));
+app.get('/android', (req, res) => servePlatformCatalogPage(req, res, 'android'));
 
 // Trang chi tiết ứng dụng theo platform: /ios/app?bundle=... | /android/app?bundle=...
 function buildAppDetailPath(platform, bundleId) {

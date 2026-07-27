@@ -261,11 +261,77 @@
         };
     }
 
+    // Gom nhóm theo platform + bundleId: mỗi nhóm là 1 "thư mục app"
+    function groupByBundle(items) {
+        const map = new Map();
+        (items || []).forEach((item) => {
+            const platform = item.platform || 'ios';
+            const key = `${platform}:${item.bundleId || item.id}`;
+            if (!map.has(key)) map.set(key, { key, platform, builds: [] });
+            map.get(key).builds.push(item);
+        });
+
+        const groups = Array.from(map.values());
+        groups.forEach((g) => {
+            g.builds.sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
+            g.latest = g.builds[0];
+            g.count = g.builds.length;
+        });
+        return groups.sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
+    }
+
+    function buildAppDetailPath(platform, bundleId) {
+        const p = platform === 'android' ? 'android' : 'ios';
+        return bundleId
+            ? `/${p}/app?bundle=${encodeURIComponent(bundleId)}`
+            : `/${p}/app`;
+    }
+
+    function buildPlatformListPath(platform) {
+        return platform === 'android' ? '/android' : '/ios';
+    }
+
+    // Thẻ thư mục app trên danh mục (home / trang platform)
+    function createAppFolderCard(group, onOpen) {
+        const { latest, count, platform } = group;
+        const platformLabel = platform === 'android' ? 'Android' : 'iOS';
+        const platformClass = platform === 'android' ? 'build-tag-android' : 'build-tag-ios';
+        const card = document.createElement('div');
+        card.className = 'app-card folder-card';
+        card.innerHTML = `
+            <div class="app-card-top">
+                <img src="${escapeHtml(latest.icon || FALLBACK_ICON)}" alt="icon" onerror="this.src='${FALLBACK_ICON}'">
+                <div class="app-card-info">
+                    <h4>${escapeHtml(latest.appName)}</h4>
+                    <p class="app-card-bundle">${escapeHtml(latest.bundleId)}</p>
+                </div>
+            </div>
+            <div class="app-card-meta">
+                <span class="build-tag ${platformClass}">${platformLabel}</span>
+                <span class="badge">📁 ${count} bản build</span>
+                <span>🆕 v${escapeHtml(latest.version)} (Build ${escapeHtml(latest.buildNumber)})</span>
+                <span>🕒 ${escapeHtml(formatDateTime(latest.uploadedAt))}</span>
+            </div>
+            <div class="app-card-actions">
+                <button type="button" class="btn view-all-btn">Xem tất cả</button>
+            </div>
+        `;
+        card.addEventListener('click', () => {
+            if (typeof onOpen === 'function') onOpen(group);
+            else window.location.href = buildAppDetailPath(platform, latest.bundleId);
+        });
+        return card;
+    }
+
     global.CatalogDetail = {
         FALLBACK_ICON,
         escapeHtml,
         formatDateTime,
         maskUdid,
-        createDetailView
+        createDetailView,
+        groupByBundle,
+        createAppFolderCard,
+        buildAppDetailPath,
+        buildPlatformListPath,
     };
 })(window);

@@ -115,7 +115,13 @@
         <a href="/download" class="btn secondary auth-nav-link">Quản lý / tạo link</a>
     </div>
     <p class="catalog-sub" id="download-products-sub">Chọn mục để tạo link gửi đối tác.</p>
-    <div id="download-products-list" class="dl-app-list"></div>
+    <div id="download-products-list" class="dl-app-list is-loading">
+        <div class="dl-list-skeleton" aria-hidden="true">
+            <div class="sk dl-list-sk-card"></div>
+            <div class="sk dl-list-sk-card"></div>
+            <div class="sk dl-list-sk-card"></div>
+        </div>
+    </div>
     <div id="download-products-empty" class="catalog-empty" style="display:none;">Chưa có mục download.</div>
 </div>
 
