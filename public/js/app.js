@@ -390,7 +390,7 @@ async function loadDownloadProductsHome() {
                 <span class="dl-app-card-arrow">›</span>
             `;
             card.addEventListener('click', () => {
-                window.location.href = `/download?id=${encodeURIComponent(product.id)}`;
+                window.location.href = `/download/detail?id=${encodeURIComponent(product.id)}`;
             });
             listEl.appendChild(card);
         }

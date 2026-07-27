@@ -54,48 +54,87 @@
             <p class="dl-field-hint" id="admin-form-error"></p>
         </div>
 
-        <div id="app-list" class="dl-app-list is-loading"></div>
+        <div id="app-list" class="dl-app-list is-loading">
+            <div class="dl-list-skeleton" aria-hidden="true">
+                <div class="sk dl-list-sk-card"></div>
+                <div class="sk dl-list-sk-card"></div>
+                <div class="sk dl-list-sk-card"></div>
+            </div>
+        </div>
         <div id="list-empty" class="catalog-empty" style="display:none;">Chưa có mục download. Admin hãy tạo mục mới ở trên.</div>
     </div>
 
     <div id="pick-view" style="display:none;">
         <button type="button" class="catalog-back" id="pick-back">← Quay lại danh sách</button>
-        <div class="dl-pick-header">
-            <img src="" alt="" class="dl-pick-icon" id="pick-icon">
-            <div>
-                <h2 id="pick-name">App</h2>
-                <p class="catalog-sub" id="pick-sub">Chọn bản build để chia sẻ</p>
+
+        <div class="dl-pick-skeleton" id="pick-skeleton" aria-hidden="true">
+            <div class="dl-pick-sk-header">
+                <div class="sk sk-dl-pick-icon"></div>
+                <div class="dl-pick-sk-info">
+                    <div class="sk sk-line sk-dl-pick-title"></div>
+                    <div class="sk sk-line sk-dl-pick-sub"></div>
+                </div>
+            </div>
+            <div class="dl-pick-sk-field">
+                <div class="sk sk-line sk-dl-pick-label"></div>
+                <div class="sk sk-dl-pick-select"></div>
+                <div class="sk sk-line sk-dl-pick-hint"></div>
+            </div>
+            <div class="dl-pick-sk-field">
+                <div class="sk sk-line sk-dl-pick-label"></div>
+                <div class="sk sk-dl-pick-select"></div>
+                <div class="sk sk-line sk-dl-pick-hint"></div>
+            </div>
+            <div class="sk sk-dl-pick-btn"></div>
+            <div class="dl-pick-sk-saved">
+                <div class="sk sk-line sk-dl-pick-saved-title"></div>
+                <div class="sk sk-dl-pick-saved-card"></div>
+                <div class="sk sk-dl-pick-saved-card"></div>
             </div>
         </div>
 
-        <div class="dl-pick-fields">
-            <label class="dl-field">
-                <span class="dl-field-label"><span class="build-tag build-tag-ios">iOS</span> Phiên bản</span>
-                <select id="ios-select" class="dl-select"></select>
-                <p class="dl-field-hint" id="ios-hint"></p>
-            </label>
-            <label class="dl-field">
-                <span class="dl-field-label"><span class="build-tag build-tag-android">Android</span> Phiên bản</span>
-                <select id="android-select" class="dl-select"></select>
-                <p class="dl-field-hint" id="android-hint"></p>
-            </label>
-        </div>
-
-        <div class="dl-share-box">
-            <button type="button" class="btn" id="save-share-btn">Lưu &amp; tạo link</button>
-            <p class="dl-field-hint" id="save-share-hint"></p>
-            <label for="share-link-input">Link vừa tạo</label>
-            <div class="url-box">
-                <input type="text" id="share-link-input" readonly value="">
-                <button type="button" class="btn secondary" id="copy-share-btn">Sao chép</button>
+        <div class="dl-pick-content" id="pick-content">
+            <div class="dl-pick-header">
+                <img src="" alt="" class="dl-pick-icon" id="pick-icon">
+                <div>
+                    <h2 id="pick-name">App</h2>
+                    <p class="catalog-sub" id="pick-sub">Chọn bản build để chia sẻ</p>
+                </div>
             </div>
-            <a href="#" id="open-share-btn" class="btn secondary disabled" target="_blank" rel="noopener">Mở trang đối tác</a>
-        </div>
 
-        <div class="dl-saved-section">
-            <h3>Link đã lưu</h3>
-            <div id="saved-shares" class="dl-saved-list"></div>
-            <div id="saved-empty" class="catalog-empty" style="display:none;">Chưa có link nào được lưu cho mục này.</div>
+            <div class="dl-pick-fields">
+                <label class="dl-field">
+                    <span class="dl-field-label"><span class="build-tag build-tag-ios">iOS</span> Phiên bản</span>
+                    <select id="ios-select" class="dl-select"></select>
+                    <p class="dl-field-hint" id="ios-hint"></p>
+                </label>
+                <label class="dl-field">
+                    <span class="dl-field-label"><span class="build-tag build-tag-android">Android</span> Phiên bản</span>
+                    <select id="android-select" class="dl-select"></select>
+                    <p class="dl-field-hint" id="android-hint"></p>
+                </label>
+            </div>
+
+            <div class="dl-share-box">
+                <button type="button" class="btn" id="save-share-btn">Lưu &amp; tạo link</button>
+                <p class="dl-field-hint" id="save-share-hint"></p>
+                <label for="share-link-input">Link vừa tạo</label>
+                <div class="url-box">
+                    <input type="text" id="share-link-input" readonly value="">
+                    <button type="button" class="btn secondary" id="copy-share-btn">Sao chép</button>
+                </div>
+                <a href="#" id="open-share-btn" class="btn secondary disabled" target="_blank" rel="noopener">Mở trang đối tác</a>
+            </div>
+
+            <div class="dl-saved-section">
+                <h3>Link đã lưu</h3>
+                <div id="saved-shares-skeleton" class="dl-saved-skeleton" aria-hidden="true">
+                    <div class="sk sk-dl-pick-saved-card"></div>
+                    <div class="sk sk-dl-pick-saved-card"></div>
+                </div>
+                <div id="saved-shares" class="dl-saved-list"></div>
+                <div id="saved-empty" class="catalog-empty" style="display:none;">Chưa có link nào được lưu cho mục này.</div>
+            </div>
         </div>
     </div>
 </div>

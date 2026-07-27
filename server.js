@@ -20,7 +20,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '19';
+const ASSET_VERSION = process.env.ASSET_VERSION || '23';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -300,7 +300,7 @@ app.get('/install', async (req, res) => {
     sendHtmlWithOg(res, 'install.html', og);
 });
 
-// Trang nội bộ: chọn bản iOS/Android rồi tạo link share cho đối tác
+// Trang danh sách mục download (admin tạo / quản lý)
 app.get('/download', (req, res) => {
     const user = getSessionUser(req);
     if (!user) {
@@ -309,10 +309,39 @@ app.get('/download', (req, res) => {
     if (!auth.hasPermission(user, 'create_download_link')) {
         return res.redirect('/');
     }
+    // Link cũ /download?id=... → chuyển sang trang chi tiết
+    const legacyId = (req.query.id || '').toString().trim();
+    if (legacyId) {
+        return res.redirect(`/download/detail?id=${encodeURIComponent(legacyId)}`);
+    }
+    const og = buildOgMeta({
+        title: 'Mục download — Share IPA',
+        description: 'Danh sách mục download do admin tạo để chia sẻ bản build cho đối tác.',
+        url: `${PUBLIC_BASE_URL}/download`,
+    });
+    sendHtmlWithOg(res, 'download.html', og);
+});
+
+// Trang chi tiết 1 mục: chọn bản iOS/Android và tạo link
+app.get('/download/detail', (req, res) => {
+    const user = getSessionUser(req);
+    const id = (req.query.id || '').toString().trim();
+    const nextPath = id
+        ? `/download/detail?id=${encodeURIComponent(id)}`
+        : '/download';
+    if (!user) {
+        return res.redirect(`/?next=${encodeURIComponent(nextPath)}`);
+    }
+    if (!auth.hasPermission(user, 'create_download_link')) {
+        return res.redirect('/');
+    }
+    if (!id) {
+        return res.redirect('/download');
+    }
     const og = buildOgMeta({
         title: 'Tạo link tải — Share IPA',
         description: 'Chọn bản iOS và Android để tạo link chia sẻ cho tester đối tác.',
-        url: `${PUBLIC_BASE_URL}/download`,
+        url: `${PUBLIC_BASE_URL}/download/detail?id=${encodeURIComponent(id)}`,
     });
     sendHtmlWithOg(res, 'download.html', og);
 });

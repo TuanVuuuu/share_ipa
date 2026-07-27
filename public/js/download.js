@@ -20,6 +20,10 @@ const saveShareBtn = document.getElementById('save-share-btn');
 const saveShareHint = document.getElementById('save-share-hint');
 const savedSharesEl = document.getElementById('saved-shares');
 const savedEmpty = document.getElementById('saved-empty');
+const savedSharesSkeleton = document.getElementById('saved-shares-skeleton');
+const savedSection = document.querySelector('.dl-saved-section');
+const pickContent = document.getElementById('pick-content');
+const pickSkeleton = document.getElementById('pick-skeleton');
 
 const adminForm = document.getElementById('admin-product-form');
 const adminFormTitle = document.getElementById('admin-form-title');
@@ -42,6 +46,12 @@ let editingProductId = null;
 let latestShareUrl = '';
 let selectedIconData = '';
 let selectedBannerData = '';
+
+const isDetailRoute = /^\/download\/detail\/?$/.test(window.location.pathname);
+
+function buildDetailPath(productId) {
+    return `/download/detail?id=${encodeURIComponent(productId)}`;
+}
 
 function escapeHtml(text) {
     return String(text == null ? '' : text)
@@ -162,9 +172,27 @@ function setLatestShare(url) {
     copyShareBtn.disabled = !latestShareUrl;
 }
 
+function setPickLoading(loading) {
+    pickView.classList.toggle('is-loading', !!loading);
+    if (pickSkeleton) pickSkeleton.setAttribute('aria-hidden', loading ? 'false' : 'true');
+    if (pickContent) pickContent.setAttribute('aria-busy', loading ? 'true' : 'false');
+}
+
+function setSavedSharesLoading(loading) {
+    if (!savedSection) return;
+    savedSection.classList.toggle('is-loading', !!loading);
+    if (savedSharesSkeleton) savedSharesSkeleton.setAttribute('aria-hidden', loading ? 'false' : 'true');
+}
+
 function showList() {
+    if (isDetailRoute) {
+        window.location.href = '/download';
+        return;
+    }
     listView.style.display = '';
     pickView.style.display = 'none';
+    setPickLoading(false);
+    setSavedSharesLoading(false);
     currentProduct = null;
     if (canManageProducts() && !editingProductId) toggleAdminForm(false);
     history.replaceState({ view: 'list' }, '', '/download');
@@ -235,7 +263,9 @@ function renderProductList() {
             </div>
             <span class="dl-app-card-arrow">›</span>
         `;
-        mainBtn.addEventListener('click', () => showPick(product.id));
+        mainBtn.addEventListener('click', () => {
+            window.location.href = buildDetailPath(product.id);
+        });
         card.appendChild(mainBtn);
 
         if (canManageProducts()) {
@@ -282,6 +312,7 @@ function renderProductList() {
 async function loadSavedShares(productId) {
     savedSharesEl.innerHTML = '';
     savedEmpty.style.display = 'none';
+    setSavedSharesLoading(true);
     try {
         const res = await fetch(`/api/download-shares?productId=${encodeURIComponent(productId)}`);
         const data = await res.json();
@@ -340,10 +371,17 @@ async function loadSavedShares(productId) {
     } catch (err) {
         savedEmpty.style.display = 'block';
         savedEmpty.textContent = err.message;
+    } finally {
+        setSavedSharesLoading(false);
     }
 }
 
 async function showPick(productId) {
+    listView.style.display = 'none';
+    pickView.style.display = '';
+    setPickLoading(true);
+    history.replaceState({ view: 'pick', id: productId }, '', buildDetailPath(productId));
+
     try {
         const res = await fetch(`/api/download-products/${encodeURIComponent(productId)}/builds`);
         const data = await res.json();
@@ -361,14 +399,12 @@ async function showPick(productId) {
         fillSelect(androidSelect, data.android || [], androidHint, currentProduct.androidBundleId ? 'Chưa có bản Android trong catalog' : 'Chưa cấu hình package Android');
         setLatestShare('');
         saveShareHint.textContent = '';
-
-        listView.style.display = 'none';
-        pickView.style.display = '';
-        history.replaceState({ view: 'pick', id: productId }, '', `/download?id=${encodeURIComponent(productId)}`);
         document.title = `${currentProduct.name} — Tạo link tải`;
 
+        setPickLoading(false);
         await loadSavedShares(productId);
     } catch (err) {
+        setPickLoading(false);
         alert(err.message);
         showList();
     }
@@ -419,8 +455,11 @@ async function saveProduct() {
 
 async function saveShare() {
     if (!currentProduct) return;
-    saveShareHint.textContent = '';
+    saveShareHint.textContent = 'Đang lưu link...';
     saveShareBtn.disabled = true;
+    const originalLabel = saveShareBtn.textContent;
+    saveShareBtn.textContent = 'Đang lưu...';
+    setSavedSharesLoading(true);
     try {
         const res = await fetch('/api/download-shares', {
             method: 'POST',
@@ -437,13 +476,51 @@ async function saveShare() {
         saveShareHint.textContent = 'Đã lưu link. Có thể sao chép và gửi đối tác.';
         await loadSavedShares(currentProduct.id);
     } catch (err) {
+        setSavedSharesLoading(false);
         saveShareHint.textContent = err.message;
     } finally {
         saveShareBtn.disabled = false;
+        saveShareBtn.textContent = originalLabel;
     }
 }
 
-async function init() {
+async function initDetailPage() {
+    const params = new URLSearchParams(window.location.search);
+    const id = (params.get('id') || '').trim();
+    if (!id) {
+        window.location.href = '/download';
+        return;
+    }
+
+    listView.style.display = 'none';
+    pickView.style.display = '';
+    setPickLoading(true);
+
+    try {
+        const authRes = await fetch('/api/auth-status');
+        const authData = await authRes.json();
+        if (!authData.authenticated) {
+            window.location.href = `/?next=${encodeURIComponent(buildDetailPath(id))}`;
+            return;
+        }
+        currentUser = {
+            username: authData.username,
+            role: authData.role,
+            permissions: authData.permissions || [],
+        };
+        if (!currentUser.permissions.includes('create_download_link')) {
+            window.location.href = '/';
+            return;
+        }
+        await showPick(id);
+    } catch (err) {
+        setPickLoading(false);
+        alert(err.message || 'Lỗi tải dữ liệu.');
+        window.location.href = '/download';
+    }
+}
+
+async function initListPage() {
     appList.classList.add('is-loading');
     try {
         const authRes = await fetch('/api/auth-status');
@@ -475,16 +552,18 @@ async function init() {
             listSub.textContent = 'Chọn danh mục do admin tạo, gắn bản iOS/Android rồi lưu link gửi đối tác.';
         }
 
-        const params = new URLSearchParams(window.location.search);
-        const id = params.get('id');
-        if (id && products.some(p => p.id === id)) await showPick(id);
-        else showList();
+        showList();
     } catch (err) {
         appList.classList.remove('is-loading');
         listEmpty.style.display = 'block';
         listEmpty.textContent = err.message || 'Lỗi tải dữ liệu.';
         if (canManageProducts() && toggleCreateBtn) toggleCreateBtn.style.display = '';
     }
+}
+
+async function init() {
+    if (isDetailRoute) await initDetailPage();
+    else await initListPage();
 }
 
 pickBack.addEventListener('click', showList);
