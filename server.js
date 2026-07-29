@@ -13,10 +13,11 @@ const github = require('./github');
 const auth = require('./auth');
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.info';
-const CATALOG_PATH = 'catalog.json';       // Chỉ mục danh sách app trên repo lưu trữ
+const CATALOG_IOS_PATH = 'catalog-ios.json';         // Danh mục riêng cho iOS
+const CATALOG_ANDROID_PATH = 'catalog-android.json'; // Danh mục riêng cho Android
 const DOWNLOAD_PRODUCTS_PATH = 'download-products.json'; // Mục download do admin tạo (tên + bundle)
 const DOWNLOAD_SHARES_PATH = 'download-shares.json';     // Link do tester tạo và lưu
-const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ lại trong danh mục
+const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ lại trong mỗi danh mục
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
@@ -549,23 +550,33 @@ function formatBytes(bytes, decimals = 2) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// 📚 Đọc toàn bộ danh mục app đã lưu trên repo GitHub
-async function readCatalog() {
-    if (!github.isConfigured()) return [];
-    const file = await github.getFile(CATALOG_PATH);
-    if (!file) return [];
-    try {
-        const parsed = JSON.parse(file.content);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch (err) {
-        console.error('Không đọc được catalog.json:', err.message);
-        return [];
-    }
+function catalogPathForPlatform(platform) {
+    return platform === 'android' ? CATALOG_ANDROID_PATH : CATALOG_IOS_PATH;
 }
 
-// Đọc file catalog.json kèm sha (cần sha để ghi đè an toàn qua GitHub API)
-async function loadCatalogFile() {
-    const file = await github.getFile(CATALOG_PATH);
+// 📚 Đọc danh mục theo platform (ios/android). Không truyền platform → gộp cả hai.
+async function readCatalog(platform) {
+    if (!github.isConfigured()) return [];
+    if (platform === 'ios' || platform === 'android') {
+        const file = await github.getFile(catalogPathForPlatform(platform));
+        if (!file) return [];
+        try {
+            const parsed = JSON.parse(file.content);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (err) {
+            console.error(`Không đọc được ${catalogPathForPlatform(platform)}:`, err.message);
+            return [];
+        }
+    }
+    // Gộp cả hai danh mục
+    const [ios, android] = await Promise.all([readCatalog('ios'), readCatalog('android')]);
+    return [...ios, ...android];
+}
+
+// Đọc file catalog theo platform kèm sha (cần sha để ghi đè an toàn qua GitHub API)
+async function loadCatalogFile(platform) {
+    const filePath = catalogPathForPlatform(platform);
+    const file = await github.getFile(filePath);
     let list = [];
     let sha;
     if (file) {
@@ -574,7 +585,7 @@ async function loadCatalogFile() {
             const parsed = JSON.parse(file.content);
             if (Array.isArray(parsed)) list = parsed;
         } catch (err) {
-            logToUI(`⚠️ catalog.json hiện tại không hợp lệ, sẽ khởi tạo lại. (${err.message})`, 'info');
+            logToUI(`⚠️ ${filePath} hiện tại không hợp lệ, sẽ khởi tạo lại. (${err.message})`, 'info');
         }
     }
     return { list, sha };
@@ -707,8 +718,8 @@ async function deletePhysicalBuildFiles(record) {
     }
 }
 
-// 💾 Thêm một bản ghi app mới vào đầu danh mục và đẩy lên GitHub.
-// Tự động dọn dẹp: giới hạn 10 build/app (R2) và CATALOG_MAX_ITEMS toàn cục.
+// 💾 Thêm một bản ghi app mới vào đầu danh mục tương ứng (ios/android) và đẩy lên GitHub.
+// Tự động dọn dẹp: giới hạn 10 build/app (R2) và CATALOG_MAX_ITEMS mỗi danh mục.
 // Trả về mảng các entry bị xóa (để caller xóa R2 object tương ứng nếu cần).
 async function appendToCatalog(record) {
     if (!github.isConfigured()) {
@@ -716,19 +727,19 @@ async function appendToCatalog(record) {
         return [];
     }
 
-    const { list, sha } = await loadCatalogFile();
+    const platform = record.platform || 'ios';
+    const { list, sha } = await loadCatalogFile(platform);
     const removed = [];
 
     // Per-app limit: giữ tối đa 10 build/app trong R2 — xóa bản cũ nhất trước khi thêm mới
     if (record.r2ObjectKey && record.bundleId) {
         const MAX_PER_APP = 10;
-        const recordPlatform = record.platform || 'ios';
         const appBuilds = list
-            .filter(item => item.bundleId === record.bundleId && item.r2ObjectKey && (item.platform || 'ios') === recordPlatform)
+            .filter(item => item.bundleId === record.bundleId && item.r2ObjectKey)
             .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
 
         if (appBuilds.length >= MAX_PER_APP) {
-            const toEvict = appBuilds.slice(MAX_PER_APP - 1); // giữ MAX_PER_APP-1 cũ + 1 mới = MAX_PER_APP
+            const toEvict = appBuilds.slice(MAX_PER_APP - 1);
             for (const old of toEvict) {
                 removed.push(old);
                 const idx = list.indexOf(old);
@@ -739,14 +750,14 @@ async function appendToCatalog(record) {
 
     list.unshift(record);
 
-    // Global catalog limit
+    // Per-catalog limit
     if (list.length > CATALOG_MAX_ITEMS) {
         const trimmed = list.splice(CATALOG_MAX_ITEMS);
         removed.push(...trimmed);
     }
 
     await github.putFile(
-        CATALOG_PATH,
+        catalogPathForPlatform(platform),
         JSON.stringify(list, null, 2),
         `add ${record.appName} ${record.version} (${record.buildNumber})`,
         sha
@@ -757,7 +768,8 @@ async function appendToCatalog(record) {
 
 app.get('/api/catalog', async (req, res) => {
     try {
-        const list = await readCatalog();
+        const platformFilter = (req.query.platform || '').toString().trim().toLowerCase();
+        const list = await readCatalog(platformFilter || undefined);
         res.json({ success: true, configured: github.isConfigured(), items: list });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh mục: ${err.message}` });
@@ -775,17 +787,29 @@ app.post('/api/catalog/delete', requirePermission('delete_build'), async (req, r
             return res.status(500).json({ success: false, message: 'Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên không thể cập nhật danh mục.' });
         }
 
-        const { list, sha } = await loadCatalogFile();
-        const idx = list.findIndex(item => item.id === targetId);
-        if (idx === -1) {
+        // Tìm bản build trong đúng catalog theo platform (thử ios trước, sau đó android)
+        let list, sha, foundPlatform;
+        for (const plt of ['ios', 'android']) {
+            const loaded = await loadCatalogFile(plt);
+            const idx2 = loaded.list.findIndex(item => item.id === targetId);
+            if (idx2 !== -1) {
+                list = loaded.list;
+                sha = loaded.sha;
+                foundPlatform = plt;
+                break;
+            }
+        }
+
+        if (!list) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy bản build này trong danh mục (có thể đã bị xóa).' });
         }
 
+        const idx = list.findIndex(item => item.id === targetId);
         const [removedRecord] = list.splice(idx, 1);
         const actor = req.currentUser.username;
 
         await github.putFile(
-            CATALOG_PATH,
+            catalogPathForPlatform(foundPlatform),
             JSON.stringify(list, null, 2),
             `delete ${removedRecord.appName} ${removedRecord.version} (${removedRecord.buildNumber}) by ${actor}`,
             sha
