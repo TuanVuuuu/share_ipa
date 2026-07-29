@@ -242,22 +242,19 @@ async function main() {
 
     console.log('\n☁️  Đang đẩy catalog lên GitHub...');
     try {
-        const tasks = [];
         if (newIos.length > 0) {
-            tasks.push(
-                github.putFile(CATALOG_IOS_PATH, JSON.stringify(mergedIos, null, 2),
-                    `rebuild ios catalog: add ${newIos.length} entries`, iosData.sha)
-                    .then(() => console.log(`✅ catalog-ios.json: ${mergedIos.length} mục`))
-            );
+            // Đọc lại SHA mới nhất trước khi ghi để tránh conflict 409
+            const latestIos = await loadCatalog(CATALOG_IOS_PATH);
+            await github.putFile(CATALOG_IOS_PATH, JSON.stringify(mergedIos, null, 2),
+                `rebuild ios catalog: add ${newIos.length} entries`, latestIos.sha);
+            console.log(`✅ catalog-ios.json: ${mergedIos.length} mục`);
         }
         if (newAndroid.length > 0) {
-            tasks.push(
-                github.putFile(CATALOG_ANDROID_PATH, JSON.stringify(mergedAndroid, null, 2),
-                    `rebuild android catalog: add ${newAndroid.length} entries`, androidData.sha)
-                    .then(() => console.log(`✅ catalog-android.json: ${mergedAndroid.length} mục`))
-            );
+            const latestAndroid = await loadCatalog(CATALOG_ANDROID_PATH);
+            await github.putFile(CATALOG_ANDROID_PATH, JSON.stringify(mergedAndroid, null, 2),
+                `rebuild android catalog: add ${newAndroid.length} entries`, latestAndroid.sha);
+            console.log(`✅ catalog-android.json: ${mergedAndroid.length} mục`);
         }
-        await Promise.all(tasks);
         console.log('\n🎉 Hoàn tất! Catalog đã được cập nhật trên GitHub.');
     } catch (err) {
         console.error('❌ Lỗi khi ghi lên GitHub:', err.message);
