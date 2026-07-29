@@ -38,14 +38,11 @@
                 return;
             }
 
-            const res = await fetch('/api/catalog');
+            const res = await fetch(`/api/catalog/${platform}`);
             if (!res.ok) throw new Error('Không tải được danh mục.');
             const data = await res.json();
             const items = Array.isArray(data.items) ? data.items : [];
-            const groups = CatalogDetail.groupByBundle(items).filter((g) => {
-                if (platform === 'android') return g.platform === 'android';
-                return g.platform !== 'android';
-            });
+            const groups = CatalogDetail.groupByBundle(items);
 
             setLoading(false);
             listEl.innerHTML = '';

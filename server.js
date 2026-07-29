@@ -766,10 +766,30 @@ async function appendToCatalog(record) {
     return removed;
 }
 
+// /api/catalog/ios — chỉ trả iOS
+app.get('/api/catalog/ios', async (req, res) => {
+    try {
+        const list = await readCatalog('ios');
+        res.json({ success: true, configured: github.isConfigured(), items: list });
+    } catch (err) {
+        res.status(500).json({ success: false, message: `Không tải được danh mục iOS: ${err.message}` });
+    }
+});
+
+// /api/catalog/android — chỉ trả Android
+app.get('/api/catalog/android', async (req, res) => {
+    try {
+        const list = await readCatalog('android');
+        res.json({ success: true, configured: github.isConfigured(), items: list });
+    } catch (err) {
+        res.status(500).json({ success: false, message: `Không tải được danh mục Android: ${err.message}` });
+    }
+});
+
+// /api/catalog — gộp cả hai (backward compat)
 app.get('/api/catalog', async (req, res) => {
     try {
-        const platformFilter = (req.query.platform || '').toString().trim().toLowerCase();
-        const list = await readCatalog(platformFilter || undefined);
+        const list = await readCatalog();
         res.json({ success: true, configured: github.isConfigured(), items: list });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh mục: ${err.message}` });
@@ -1795,6 +1815,38 @@ app.post('/api/r2-finalize', async (req, res) => {
     }
 });
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Xóa catalog.json cũ (đã tách thành catalog-ios.json / catalog-android.json)
+(async () => {
+    if (!github.isConfigured()) return;
+    try {
+        const old = await github.getFile('catalog.json');
+        if (!old) return;
+        console.log('[MIGRATE] Xóa catalog.json cũ khỏi GitHub...');
+        const { Octokit } = await import('@octokit/rest').catch(() => null) || {};
+        // Dùng GitHub API xóa file: PUT với content rỗng không work — dùng DELETE endpoint
+        const { token, repo, branch } = github.getConfig();
+        const [owner, repoName] = repo.split('/');
+        const delRes = await fetch(`https://api.github.com/repos/${repo}/contents/catalog.json`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ message: 'remove legacy catalog.json (split to ios/android)', sha: old.sha, branch }),
+        });
+        if (delRes.ok) {
+            console.log('[MIGRATE] ✅ Đã xóa catalog.json cũ.');
+        } else {
+            const txt = await delRes.text();
+            console.warn('[MIGRATE] ⚠️ Không xóa được catalog.json:', txt);
+        }
+    } catch (err) {
+        console.warn('[MIGRATE] ⚠️ Lỗi migration catalog.json:', err.message);
+    }
+})();
 
 const server = app.listen(PORT, () => console.log(`Diawi Local-First System active on port ${PORT}`));
 server.timeout = 600000;

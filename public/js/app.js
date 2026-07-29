@@ -423,14 +423,21 @@ async function loadCatalog() {
     if (!isAuthenticated) return;
     setCatalogLoading(true);
     try {
-        const res = await fetch('/api/catalog');
-        if (!res.ok) throw new Error('Không tải được danh mục.');
-        const data = await res.json();
-        catalogItems = Array.isArray(data.items) ? data.items : [];
-        if (!data.configured) {
+        const [iosRes, androidRes] = await Promise.all([
+            fetch('/api/catalog/ios'),
+            fetch('/api/catalog/android'),
+        ]);
+        if (!iosRes.ok || !androidRes.ok) throw new Error('Không tải được danh mục.');
+        const [iosData, androidData] = await Promise.all([iosRes.json(), androidRes.json()]);
+        catalogItems = [
+            ...(Array.isArray(iosData.items) ? iosData.items : []),
+            ...(Array.isArray(androidData.items) ? androidData.items : []),
+        ];
+        const configured = iosData.configured !== false && androidData.configured !== false;
+        if (!configured) {
             catalogSub.innerText = '⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO trong .env nên danh mục trống.';
         }
-        renderCatalog(data.configured);
+        renderCatalog(configured);
     } catch (err) {
         setCatalogLoading(false);
         catalogSub.innerText = `Lỗi tải danh mục: ${err.message}`;
