@@ -16,7 +16,7 @@ const auth = require('./auth');
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.site';
 const LEGACY_PUBLIC_HOSTS = ['share-ipa.vunt.info'];
-// URL máy chủ trong LAN (vd: http://192.168.1.50:3080). Để trống → tự nhận IP LAN + PORT.
+// URL máy chủ trong LAN (vd: http://192.168.1.105:3080). Để trống → tự nhận IP LAN + Caddy :3080.
 const LAN_BASE_URL = (process.env.LAN_BASE_URL || '').trim().replace(/\/$/, '');
 const CATALOG_IOS_PATH = 'catalog-ios.json';         // Danh mục riêng cho iOS
 const CATALOG_ANDROID_PATH = 'catalog-android.json'; // Danh mục riêng cho Android
@@ -26,7 +26,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '30';
+const ASSET_VERSION = process.env.ASSET_VERSION || '31';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -112,7 +112,7 @@ console.log('GITHUB_TOKEN:', process.env.GITHUB_TOKEN ? '***(đã cấu hình)' 
 console.log('=========================');
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 3081;
 const AUTH_COOKIE_NAME = 'share_ipa_auth';
 
 function lanIpPriority(ip) {

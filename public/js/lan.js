@@ -182,9 +182,9 @@
 
         const localIps = await discoverLocalIpv4s();
         const serverIps = Array.isArray(info.addresses) ? info.addresses : [];
-        let fallbackPort = '3000';
+        let fallbackPort = '3081';
         try {
-            if (info.baseUrl) fallbackPort = new URL(info.baseUrl).port || '3000';
+            if (info.baseUrl) fallbackPort = new URL(info.baseUrl).port || '3081';
         } catch (_) { /* ignore */ }
         for (const serverIp of serverIps) {
             if (!localIps.some((lip) => sameIpv4Subnet(lip, serverIp))) continue;

@@ -23,7 +23,7 @@ fi
 
 mkdir -p logs
 PID_DIR="$APP_DIR/logs"
-PORT_NUM="${PORT:-3000}"
+PORT_NUM="${PORT:-3081}"
 
 free_port() {
   local port="$1"
