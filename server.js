@@ -26,7 +26,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '31';
+const ASSET_VERSION = process.env.ASSET_VERSION || '32';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -1845,6 +1845,13 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
         return res.status(400).json({ success: false, message: 'Không tìm thấy tệp tin IPA/APK.' });
     }
     const sessionUser = getSessionUser(req);
+    const viaLan = isLanRequest(req);
+    if (viaLan) {
+        await logRealtime(
+            `📡 LAN direct upload — đã nhận ${formatBytes(req.file.size)} (không qua R2/Tunnel).`,
+            'success'
+        );
+    }
     return processUploadedIpa(res, {
         finalFilename: req.file.filename,
         finalPath: req.file.path,

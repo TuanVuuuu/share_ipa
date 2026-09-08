@@ -866,8 +866,8 @@ async function uploadSecure(file) {
 
     const useLan = !!(window.LanTransfer && await window.LanTransfer.canUploadLocally());
     if (useLan) {
-        setActivity('Cùng mạng LAN — upload thẳng vào máy chủ, không qua R2...', 'active');
-        return uploadViaChunks(file, startedAt, { viaLan: true });
+        setActivity('Cùng mạng LAN — gửi 1 luồng thẳng vào máy chủ (không chunk, không R2)...', 'active');
+        return uploadViaLanDirect(file, startedAt);
     }
 
     let r2Info = null;
@@ -882,8 +882,8 @@ async function uploadSecure(file) {
             r2Info = { r2UploadId: r2StartData.r2UploadId, objectKey: r2StartData.objectKey };
         }
         if (r2StartData && r2StartData.skipReason === 'lan') {
-            setActivity('Cùng mạng LAN — upload thẳng vào máy chủ, không qua R2...', 'active');
-            return uploadViaChunks(file, startedAt, { viaLan: true });
+            setActivity('Cùng mạng LAN — gửi 1 luồng thẳng vào máy chủ (không chunk, không R2)...', 'active');
+            return uploadViaLanDirect(file, startedAt);
         }
     } catch (_) { /* mạng lỗi → fallback */ }
 
@@ -891,6 +891,54 @@ async function uploadSecure(file) {
         return uploadViaR2(file, startedAt, r2Info);
     }
     return uploadViaChunks(file, startedAt);
+}
+
+// LAN: 1 request duy nhất → đĩa máy chủ. Không chia chunk (chunk chỉ cần khi đi Tunnel).
+async function uploadViaLanDirect(file, startedAt) {
+    try {
+        armStallWatch();
+        _recordSpeedSample();
+        setActivity('LAN direct upload — 1 luồng TCP nội bộ...', 'active');
+
+        await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.upload.addEventListener('progress', (e) => {
+                if (!e.lengthComputable) return;
+                _uploadCompletedBytes = 0;
+                _uploadInFlightBytes[0] = e.loaded;
+                _recordSpeedSample();
+                _refreshProgress(file.size, 1);
+                armStallWatch();
+            });
+            xhr.addEventListener('load', () => {
+                let data = null;
+                try { data = JSON.parse(xhr.responseText); } catch (_) {}
+                if (xhr.status >= 200 && xhr.status < 300 && data && data.success) {
+                    _uploadCompletedBytes = file.size;
+                    delete _uploadInFlightBytes[0];
+                    clearStallWatch();
+                    clearInterval(progressTimer);
+                    updateProgress(100, 'Máy chủ đã nhận xong — đang hoàn tất...');
+                    renderSuccess(data, startedAt);
+                    resolve();
+                } else {
+                    reject(new Error((data && data.message) || `Upload LAN thất bại (HTTP ${xhr.status}).`));
+                }
+            });
+            xhr.addEventListener('error', () => reject(new Error('Lỗi mạng khi upload LAN.')));
+            xhr.addEventListener('timeout', () => reject(new Error('Upload LAN timeout.')));
+            xhr.timeout = 30 * 60 * 1000;
+
+            const formData = new FormData();
+            formData.append('ipaFile', file, file.name);
+            xhr.open('POST', '/api/upload-secure');
+            xhr.send(formData);
+        });
+    } catch (err) {
+        clearInterval(progressTimer);
+        clearStallWatch();
+        failUpload(err.message || 'Không thể upload qua LAN.');
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
