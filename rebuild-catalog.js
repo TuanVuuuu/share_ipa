@@ -13,7 +13,7 @@ const AppInfoParser = require('app-info-parser');
 const QRCode = require('qrcode');
 const github = require('./github');
 
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.info';
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.site';
 const UPLOADS_DIR = '/Users/sds/dev/share_ipa/uploads';
 const CATALOG_IOS_PATH = 'catalog-ios.json';
 const CATALOG_ANDROID_PATH = 'catalog-android.json';

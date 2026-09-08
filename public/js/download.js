@@ -340,6 +340,7 @@ async function loadSavedShares(productId) {
                 <div class="dl-saved-actions">
                     <button type="button" class="btn secondary" data-copy>Sao chép</button>
                     <a class="btn secondary" href="${escapeHtml(share.shareUrl)}" target="_blank" rel="noopener">Mở</a>
+                    <button type="button" class="btn secondary" data-images>Tải ảnh</button>
                     <button type="button" class="btn secondary" data-delete>Xóa</button>
                 </div>
             `;
@@ -349,6 +350,24 @@ async function loadSavedShares(productId) {
                 } catch (_) {
                     row.querySelector('.dl-saved-url').select();
                     document.execCommand('copy');
+                }
+            });
+            const imagesBtn = row.querySelector('[data-images]');
+            imagesBtn.addEventListener('click', async () => {
+                if (!window.ShareCardImage) {
+                    alert('Không tải được công cụ tạo ảnh. Hãy refresh trang.');
+                    return;
+                }
+                const originalLabel = imagesBtn.textContent;
+                imagesBtn.disabled = true;
+                imagesBtn.textContent = 'Đang tạo...';
+                try {
+                    await window.ShareCardImage.downloadShareCardImages(share);
+                } catch (err) {
+                    alert(err.message || 'Không tạo được ảnh.');
+                } finally {
+                    imagesBtn.disabled = false;
+                    imagesBtn.textContent = originalLabel;
                 }
             });
             row.querySelector('[data-delete]').addEventListener('click', async () => {

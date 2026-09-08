@@ -70,6 +70,7 @@ async function init() {
     }
 
     let platform = looksLikeApk ? 'android' : (looksLikePlist ? 'ios' : null);
+    let lanHintShown = false;
 
     try {
         const res = await fetch(`/api/app-info?${looksLikePlist ? 'plist' : 'id'}=${encodeURIComponent(buildId)}`);
@@ -85,7 +86,17 @@ async function init() {
             installVersion.innerText = `Phiên bản ${it.version} • Build ${it.buildNumber}`;
             installVersion.style.display = 'inline-block';
             if (it.icon) installIcon.src = it.icon;
-            if (it.downloadUrl) installBtn.href = it.downloadUrl;
+
+            if (window.LanTransfer) {
+                await window.LanTransfer.applyDownloadHref(installBtn, it);
+                const lanBase = await window.LanTransfer.getLanBase();
+                if (lanBase && it.localFileAvailable) {
+                    lanHintShown = true;
+                    installHint.dataset.lan = '1';
+                }
+            } else if (it.downloadUrl) {
+                installBtn.href = it.downloadUrl.replace(/share-ipa\.vunt\.info/g, window.location.host);
+            }
 
             const parts = [];
             if (it.fileSize) parts.push(`📦 ${it.fileSize}`);
@@ -147,14 +158,18 @@ async function init() {
 
     if (platform === 'android') {
         installBtn.innerText = 'Tải & cài đặt APK';
-        installHint.innerText = 'Mở trang này bằng Android. Nếu bị chặn, bật “Cài đặt từ nguồn không xác định” cho trình duyệt rồi mở lại file APK đã tải.';
+        installHint.innerText = lanHintShown
+            ? 'Đang dùng mạng nội bộ — tải nhanh hơn. Nếu bị chặn, bật “Cài đặt từ nguồn không xác định”.'
+            : 'Mở trang này bằng Android. Nếu bị chặn, bật “Cài đặt từ nguồn không xác định” cho trình duyệt rồi mở lại file APK đã tải.';
         if (isAndroidUa() && installBtn.href && installBtn.href !== '#') {
             setTimeout(() => {
                 try { window.location.href = installBtn.href; } catch (_) { /* ignore */ }
             }, 1200);
         }
     } else {
-        installHint.innerText = 'Nếu iPhone/iPad không tự chuyển qua màn hình cài đặt, hãy bấm "Cài đặt ngay".';
+        installHint.innerText = lanHintShown
+            ? 'Đang dùng mạng nội bộ — tải nhanh hơn. Nếu không tự mở màn hình cài đặt, hãy bấm "Cài đặt ngay".'
+            : 'Nếu iPhone/iPad không tự chuyển qua màn hình cài đặt, hãy bấm "Cài đặt ngay".';
         if (isIosUa()) {
             setTimeout(() => {
                 try { window.location.href = installBtn.href; } catch (_) { /* ignore */ }

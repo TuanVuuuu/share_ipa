@@ -1,4 +1,5 @@
 const path = require('path');
+const os = require('os');
 
 require('dotenv').config({
     path: path.join(__dirname, '.env')
@@ -12,7 +13,10 @@ const QRCode = require('qrcode');
 const github = require('./github');
 const auth = require('./auth');
 
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.info';
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://share-ipa.vunt.site';
+const LEGACY_PUBLIC_HOSTS = ['share-ipa.vunt.info'];
+// URL máy chủ trong LAN (vd: http://192.168.1.50:3080). Để trống → tự nhận IP LAN + PORT.
+const LAN_BASE_URL = (process.env.LAN_BASE_URL || '').trim().replace(/\/$/, '');
 const CATALOG_IOS_PATH = 'catalog-ios.json';         // Danh mục riêng cho iOS
 const CATALOG_ANDROID_PATH = 'catalog-android.json'; // Danh mục riêng cho Android
 const DOWNLOAD_PRODUCTS_PATH = 'download-products.json'; // Mục download do admin tạo (tên + bundle)
@@ -21,7 +25,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '25';
+const ASSET_VERSION = process.env.ASSET_VERSION || '28';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -107,8 +111,61 @@ console.log('GITHUB_TOKEN:', process.env.GITHUB_TOKEN ? '***(đã cấu hình)' 
 console.log('=========================');
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const AUTH_COOKIE_NAME = 'share_ipa_auth';
+
+function getLanIpv4Addresses() {
+    const nets = os.networkInterfaces();
+    const out = [];
+    for (const name of Object.keys(nets || {})) {
+        for (const net of nets[name] || []) {
+            const family = net.family === 4 || net.family === 'IPv4';
+            if (family && !net.internal && net.address) out.push(net.address);
+        }
+    }
+    return out;
+}
+
+function resolveConfiguredLanBaseUrl() {
+    if (LAN_BASE_URL) return LAN_BASE_URL;
+    const ips = getLanIpv4Addresses();
+    if (!ips.length) return '';
+    return `http://${ips[0]}:${PORT}`;
+}
+
+function isPrivateHostname(hostname) {
+    const host = String(hostname || '').split(':')[0].toLowerCase();
+    if (!host) return false;
+    if (host === 'localhost' || host.endsWith('.local')) return true;
+    if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) return true;
+    const m = host.match(/^172\.(\d+)\./);
+    if (m) {
+        const n = Number(m[1]);
+        return n >= 16 && n <= 31;
+    }
+    return false;
+}
+
+function requestBaseUrl(req) {
+    const xfProto = (req.headers['x-forwarded-proto'] || '').toString().split(',')[0].trim();
+    const proto = xfProto || req.protocol || 'http';
+    const xfHost = (req.headers['x-forwarded-host'] || '').toString().split(',')[0].trim();
+    const host = xfHost || req.headers.host || `localhost:${PORT}`;
+    return `${proto}://${host}`.replace(/\/$/, '');
+}
+
+function isLanRequest(req) {
+    const xfHost = (req.headers['x-forwarded-host'] || '').toString().split(',')[0].trim();
+    const host = (xfHost || req.headers.host || '').split(':')[0];
+    if (isPrivateHostname(host)) return true;
+    const lanBase = resolveConfiguredLanBaseUrl();
+    if (!lanBase) return false;
+    try {
+        return new URL(lanBase).host === (xfHost || req.headers.host || '');
+    } catch (_) {
+        return false;
+    }
+}
 
 const UPLOADS_MAIN_DIR = '/Users/sds/dev/share_ipa/uploads';
 const ARCHIVE_STORAGE_DIR = '/Users/sds/dev/share_ipa/storage';
@@ -185,7 +242,7 @@ function buildOgMeta({ title, description, image, url } = {}) {
     const esc = (s = '') => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const t = esc(title || 'Share IPA');
     const d = esc(description || 'Nền tảng chia sẻ và cài đặt ứng dụng iOS/Android nội bộ dễ dàng.');
-    const img = image || `${PUBLIC_BASE_URL}/ic_launcher_web.png`;
+    const img = rewritePublicUrl(image || `${PUBLIC_BASE_URL}/ic_launcher_web.png`);
     const u = url || PUBLIC_BASE_URL;
     return [
         `<meta property="og:type" content="website">`,
@@ -258,15 +315,66 @@ app.use(express.static('public', {
         }
     }
 }));
+app.get('/uploads/:filename', (req, res, next) => {
+    const filename = path.basename(req.params.filename || '');
+    if (!filename.toLowerCase().endsWith('.plist')) return next();
+    const filePath = path.join(UPLOADS_MAIN_DIR, filename);
+    fs.readFile(filePath, 'utf8', (err, content) => {
+        if (err) return next();
+        let out = rewritePublicUrl(content);
+        // Cùng mạng / truy cập qua LAN: trỏ IPA về host hiện tại nếu file còn trên đĩa
+        const ipaName = filename.replace(/\.plist$/i, '');
+        if (uploadsFileExists(ipaName)) {
+            const packageUrl = `${requestBaseUrl(req)}/uploads/${encodeURIComponent(ipaName)}`;
+            out = out.replace(
+                /(<key>url<\/key>\s*<string>)[^<]*(<\/string>)/i,
+                `$1${packageUrl}$2`
+            );
+        }
+        res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.send(out);
+    });
+});
 app.use('/uploads', express.static(UPLOADS_MAIN_DIR, {
     setHeaders: (res, filePath) => {
         if (filePath.toLowerCase().endsWith('.apk')) {
             res.setHeader('Content-Type', 'application/vnd.android.package-archive');
             res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+        } else if (filePath.toLowerCase().endsWith('.ipa')) {
+            res.setHeader('Content-Type', 'application/octet-stream');
+            res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
         }
     }
 }));
 app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
+
+// Probe LAN: client (đang mở site public) gọi chéo origin để biết có cùng mạng không
+app.get('/api/lan-ping', (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, t: Date.now() });
+});
+
+app.options('/api/lan-ping', (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.status(204).end();
+});
+
+app.get('/api/lan-info', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const baseUrl = resolveConfiguredLanBaseUrl();
+    res.json({
+        success: true,
+        enabled: !!baseUrl,
+        baseUrl: baseUrl || null,
+        addresses: getLanIpv4Addresses(),
+        publicBaseUrl: PUBLIC_BASE_URL,
+        viaLanHost: isLanRequest(req),
+    });
+});
 
 // Đường dẫn /login cũ giờ trỏ thẳng về trang chính (ô đăng nhập nằm ngay trong trang)
 app.get('/login', (req, res) => res.redirect('/'));
@@ -550,6 +658,99 @@ function formatBytes(bytes, decimals = 2) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
+function currentPublicHost() {
+    try {
+        return new URL(PUBLIC_BASE_URL).host;
+    } catch (_) {
+        return 'share-ipa.vunt.site';
+    }
+}
+
+function rewritePublicUrl(value) {
+    if (!value || typeof value !== 'string') return value;
+    const host = currentPublicHost();
+    let out = value;
+    for (const legacy of LEGACY_PUBLIC_HOSTS) {
+        if (!legacy || legacy === host) continue;
+        if (out.includes(legacy)) out = out.split(legacy).join(host);
+    }
+    return out;
+}
+
+function withCurrentPublicUrls(item) {
+    if (!item || typeof item !== 'object') return item;
+    const next = { ...item };
+    for (const key of ['shareUrl', 'downloadUrl', 'icon', 'qr', 'productIcon', 'productBanner', 'banner']) {
+        if (typeof next[key] === 'string') next[key] = rewritePublicUrl(next[key]);
+    }
+    return next;
+}
+
+function buildClientDownloadUrl(record, baseUrl) {
+    if (!record || !record.id || !baseUrl) return null;
+    const platform = record.platform || 'ios';
+    if (platform === 'android') {
+        return `${baseUrl}/uploads/${encodeURIComponent(record.id)}`;
+    }
+    const plistFilename = record.id.toLowerCase().endsWith('.plist')
+        ? record.id
+        : `${record.id}.plist`;
+    const manifestUrl = `${baseUrl}/uploads/${encodeURIComponent(plistFilename)}`;
+    return `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
+}
+
+// Chuẩn hóa bản ghi trả client: có id + cờ localFileAvailable để frontend ưu tiên LAN
+function toClientBuild(record, req) {
+    if (!record) return null;
+    const item = withCurrentPublicUrls({ ...record });
+    const id = item.id || null;
+    const localFileAvailable = !!(id && uploadsFileExists(id));
+    item.localFileAvailable = localFileAvailable;
+
+    if (localFileAvailable && req && isLanRequest(req)) {
+        const lanDownload = buildClientDownloadUrl(item, requestBaseUrl(req));
+        if (lanDownload) item.downloadUrl = lanDownload;
+    }
+    return item;
+}
+
+function uploadsFileExists(filename) {
+    const safe = path.basename(filename || '');
+    if (!safe || safe !== filename) return false;
+    try {
+        return fs.existsSync(path.join(UPLOADS_MAIN_DIR, safe));
+    } catch (_) {
+        return false;
+    }
+}
+
+function fallbackBuildFromId(targetId) {
+    const id = String(targetId || '').replace(/\.plist$/i, '');
+    if (!id) return null;
+    const isAndroid = id.toLowerCase().endsWith('.apk');
+    if (isAndroid) {
+        if (!uploadsFileExists(id)) return null;
+        return withCurrentPublicUrls({
+            id,
+            platform: 'android',
+            appName: id,
+            shareUrl: `${PUBLIC_BASE_URL}/install?id=${encodeURIComponent(id)}`,
+            downloadUrl: `${PUBLIC_BASE_URL}/uploads/${id}`,
+        });
+    }
+
+    const plistFilename = `${id}.plist`;
+    if (!uploadsFileExists(id) && !uploadsFileExists(plistFilename)) return null;
+    const manifestUrl = `${PUBLIC_BASE_URL}/uploads/${plistFilename}`;
+    return withCurrentPublicUrls({
+        id,
+        platform: 'ios',
+        appName: id,
+        shareUrl: `${PUBLIC_BASE_URL}/install?plist=${encodeURIComponent(plistFilename)}`,
+        downloadUrl: `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`,
+    });
+}
+
 function catalogPathForPlatform(platform) {
     return platform === 'android' ? CATALOG_ANDROID_PATH : CATALOG_IOS_PATH;
 }
@@ -562,7 +763,7 @@ async function readCatalog(platform) {
         if (!file) return [];
         try {
             const parsed = JSON.parse(file.content);
-            return Array.isArray(parsed) ? parsed : [];
+            return Array.isArray(parsed) ? parsed.map(withCurrentPublicUrls) : [];
         } catch (err) {
             console.error(`Không đọc được ${catalogPathForPlatform(platform)}:`, err.message);
             return [];
@@ -633,7 +834,7 @@ async function saveJsonArrayFile(filePath, list, message, sha) {
 function persistDownloadImage(dataUrlOrUrl, kind) {
     const raw = (dataUrlOrUrl || '').toString().trim();
     if (!raw) return null;
-    if (/^https?:\/\//i.test(raw) || raw.startsWith('/uploads/')) return raw;
+    if (/^https?:\/\//i.test(raw) || raw.startsWith('/uploads/')) return rewritePublicUrl(raw);
 
     const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/i.exec(raw);
     if (!match) return null;
@@ -660,7 +861,7 @@ function persistDownloadImage(dataUrlOrUrl, kind) {
 }
 
 function publicProduct(p) {
-    return {
+    return withCurrentPublicUrls({
         id: p.id,
         name: p.name,
         iosBundleId: p.iosBundleId || '',
@@ -670,11 +871,11 @@ function publicProduct(p) {
         createdAt: p.createdAt || null,
         createdBy: p.createdBy || null,
         updatedAt: p.updatedAt || null,
-    };
+    });
 }
 
 function publicShare(s) {
-    return {
+    return withCurrentPublicUrls({
         id: s.id,
         productId: s.productId,
         productName: s.productName || '',
@@ -689,14 +890,13 @@ function publicShare(s) {
         createdAt: s.createdAt || null,
         createdBy: s.createdBy || null,
         shareUrl: `${PUBLIC_BASE_URL}/dl?s=${encodeURIComponent(s.id)}`,
-    };
+    });
 }
 
-// Xóa file vật lý của một bản build (R2 object hoặc file local + bản sao lưu trữ + plist)
+// Xóa file vật lý của một bản build (R2 object + cache LAN local + bản sao lưu trữ + plist)
 async function deletePhysicalBuildFiles(record) {
     if (record.r2ObjectKey) {
         await deleteR2Object(record.r2ObjectKey);
-        return;
     }
     try {
         const localPath = path.join(UPLOADS_MAIN_DIR, record.id);
@@ -770,7 +970,7 @@ async function appendToCatalog(record) {
 app.get('/api/catalog/ios', async (req, res) => {
     try {
         const list = await readCatalog('ios');
-        res.json({ success: true, configured: github.isConfigured(), items: list });
+        res.json({ success: true, configured: github.isConfigured(), items: list.map(item => toClientBuild(item, req)) });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh mục iOS: ${err.message}` });
     }
@@ -780,7 +980,7 @@ app.get('/api/catalog/ios', async (req, res) => {
 app.get('/api/catalog/android', async (req, res) => {
     try {
         const list = await readCatalog('android');
-        res.json({ success: true, configured: github.isConfigured(), items: list });
+        res.json({ success: true, configured: github.isConfigured(), items: list.map(item => toClientBuild(item, req)) });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh mục Android: ${err.message}` });
     }
@@ -790,7 +990,7 @@ app.get('/api/catalog/android', async (req, res) => {
 app.get('/api/catalog', async (req, res) => {
     try {
         const list = await readCatalog();
-        res.json({ success: true, configured: github.isConfigured(), items: list });
+        res.json({ success: true, configured: github.isConfigured(), items: list.map(item => toClientBuild(item, req)) });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh mục: ${err.message}` });
     }
@@ -1170,30 +1370,32 @@ app.get('/api/app-info', async (req, res) => {
         const targetId = rawPlist.replace(/\.plist$/i, '');
 
         const list = await readCatalog();
-        const record = list.find(item => item.id === targetId);
+        const record = list.find(item => item.id === targetId) || fallbackBuildFromId(targetId);
 
         if (!record) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy thông tin bản build này.' });
         }
 
-        // Chỉ trả về thông tin của riêng bản build được yêu cầu
+        const item = toClientBuild(record, req);
         return res.json({
             success: true,
             item: {
-                appName: record.appName,
-                bundleId: record.bundleId,
-                platform: record.platform || 'ios',
-                version: record.version,
-                buildNumber: record.buildNumber,
-                minimumOsVersion: record.minimumOsVersion || null,
-                profileType: record.profileType || null,
-                provisionedDevices: record.provisionedDevices || null,
-                provisionedDevicesCount: record.provisionedDevicesCount ?? null,
-                icon: record.icon,
-                fileSize: record.fileSize,
-                uploadedAt: record.uploadedAt,
-                shareUrl: record.shareUrl,
-                downloadUrl: record.downloadUrl
+                id: item.id,
+                appName: item.appName,
+                bundleId: item.bundleId,
+                platform: item.platform || 'ios',
+                version: item.version,
+                buildNumber: item.buildNumber,
+                minimumOsVersion: item.minimumOsVersion || null,
+                profileType: item.profileType || null,
+                provisionedDevices: item.provisionedDevices || null,
+                provisionedDevicesCount: item.provisionedDevicesCount ?? null,
+                icon: item.icon,
+                fileSize: item.fileSize,
+                uploadedAt: item.uploadedAt,
+                shareUrl: item.shareUrl,
+                downloadUrl: item.downloadUrl,
+                localFileAvailable: !!item.localFileAvailable,
             }
         });
     } catch (err) {
@@ -1215,23 +1417,29 @@ app.get('/api/app-builds', async (req, res) => {
         const builds = list
             .filter(item => (item.bundleId || item.id) === bundleId)
             .filter(item => !platformFilter || (item.platform || 'ios') === platformFilter)
-            .map(item => ({
-                appName: item.appName,
-                bundleId: item.bundleId,
-                platform: item.platform || 'ios',
-                version: item.version,
-                buildNumber: item.buildNumber,
-                minimumOsVersion: item.minimumOsVersion || null,
-                profileType: item.profileType || null,
-                provisionedDevices: item.provisionedDevices || null,
-                provisionedDevicesCount: item.provisionedDevicesCount ?? null,
-                icon: item.icon,
-                qr: item.qr,
-                fileSize: item.fileSize,
-                uploadedAt: item.uploadedAt,
-                shareUrl: item.shareUrl,
-                downloadUrl: item.downloadUrl
-            }))
+            .map(item => {
+                const b = toClientBuild(item, req);
+                return {
+                    id: b.id,
+                    appName: b.appName,
+                    bundleId: b.bundleId,
+                    platform: b.platform || 'ios',
+                    version: b.version,
+                    buildNumber: b.buildNumber,
+                    minimumOsVersion: b.minimumOsVersion || null,
+                    profileType: b.profileType || null,
+                    provisionedDevices: b.provisionedDevices || null,
+                    provisionedDevicesCount: b.provisionedDevicesCount ?? null,
+                    icon: b.icon,
+                    qr: b.qr,
+                    fileSize: b.fileSize,
+                    uploadedAt: b.uploadedAt,
+                    shareUrl: b.shareUrl,
+                    downloadUrl: b.downloadUrl,
+                    localFileAvailable: !!b.localFileAvailable,
+                    uploadedBy: b.uploadedBy || null,
+                };
+            })
             .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
 
         if (!builds.length) {
@@ -1475,8 +1683,7 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                             }
                         }
                     }
-                    // ── R2 mode: file đã nằm trên R2, không cần lưu local ──
-                    // (file tạm sẽ bị xóa bởi r2-finalize sau khi hàm này return)
+                    // ── R2 mode: file trên R2; bản local được giữ ở r2-finalize để phục vụ LAN ──
 
                     let qrDataUrl = '';
                     try {
@@ -1511,12 +1718,10 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                     await logRealtime('☁️ Đang đồng bộ thông tin app lên danh mục GitHub...', 'info');
                     const removedFromCatalog = await appendToCatalog(catalogRecord);
 
-                    // Xóa R2 objects của các entry bị loại khỏi danh mục
+                    // Xóa R2 + cache LAN local của các entry bị loại khỏi danh mục
                     for (const item of removedFromCatalog) {
-                        if (item.r2ObjectKey) {
-                            await deleteR2Object(item.r2ObjectKey);
-                            logToUI(`🗑️ R2 cleanup: ${item.appName} ${item.version} (${item.fileSize || ''})`, 'info');
-                        }
+                        await deletePhysicalBuildFiles(item);
+                        logToUI(`🗑️ Cleanup: ${item.appName} ${item.version} (${item.fileSize || ''})`, 'info');
                     }
 
                     await logRealtime('🗂️ Đã lưu xong danh mục. Toàn bộ quy trình hoàn tất!', 'success');
@@ -1762,10 +1967,12 @@ app.post('/api/r2-finalize', async (req, res) => {
         const uploadedBy = getSessionUser(req)?.username || null;
         res.json({ success: true, status: 'pending', jobId });
 
-        // Xử lý nền: tải IPA từ R2 về temp → parse → trả kết quả → dọn temp
+        // Xử lý nền: tải IPA từ R2 về máy → parse → giữ bản local (LAN cache) → trả kết quả
         (async () => {
             const tmpFilename = `tmp_${jobId}_${path.basename(objectKey)}`;
             const tmpPath = path.join(UPLOADS_MAIN_DIR, tmpFilename);
+            let keepLocalCache = false;
+            let finalFilename = path.basename(objectKey);
             try {
                 await logRealtime('☁️ R2 đã nhận xong. Đang tải file về máy chủ để phân tích...', 'info');
 
@@ -1778,7 +1985,7 @@ app.post('/api/r2-finalize', async (req, res) => {
                 const fileStat = await fs.promises.stat(tmpPath);
                 await logRealtime(`✅ Đã tải về (${formatBytes(fileStat.size)}). Đang phân tích metadata...`, 'success');
 
-                const finalFilename = path.basename(objectKey);
+                finalFilename = path.basename(objectKey);
                 const mockRes = {
                     _statusCode: 200, _body: null,
                     status(c) { this._statusCode = c; return this; },
@@ -1795,6 +2002,7 @@ app.post('/api/r2-finalize', async (req, res) => {
 
                 if (mockRes._statusCode >= 200 && mockRes._statusCode < 300 && mockRes._body?.success) {
                     jobStore.set(jobId, { status: 'done', result: mockRes._body, createdAt: Date.now() });
+                    keepLocalCache = true;
                 } else {
                     const errMsg = mockRes._body?.message || 'Lỗi không xác định khi xử lý file.';
                     jobStore.set(jobId, { status: 'error', error: errMsg, createdAt: Date.now() });
@@ -1806,7 +2014,23 @@ app.post('/api/r2-finalize', async (req, res) => {
                 logToUI(`❌ Lỗi r2-finalize nền (job ${jobId}): ${err.message}`, 'error');
                 await deleteR2Object(objectKey);
             } finally {
-                fs.promises.unlink(tmpPath).catch(() => {});
+                if (keepLocalCache) {
+                    const destPath = path.join(UPLOADS_MAIN_DIR, finalFilename);
+                    try {
+                        if (path.resolve(tmpPath) !== path.resolve(destPath)) {
+                            await fs.promises.rename(tmpPath, destPath).catch(async () => {
+                                await fs.promises.copyFile(tmpPath, destPath);
+                                await fs.promises.unlink(tmpPath);
+                            });
+                        }
+                        await logRealtime('📡 Đã giữ bản local để tải nhanh qua LAN.', 'info');
+                    } catch (cacheErr) {
+                        logToUI(`⚠️ Không giữ được cache LAN: ${cacheErr.message}`, 'info');
+                        fs.promises.unlink(tmpPath).catch(() => {});
+                    }
+                } else {
+                    fs.promises.unlink(tmpPath).catch(() => {});
+                }
             }
         })();
     } catch (err) {
@@ -1848,6 +2072,14 @@ app.post('/api/r2-finalize', async (req, res) => {
     }
 })();
 
-const server = app.listen(PORT, () => console.log(`Diawi Local-First System active on port ${PORT}`));
+const server = app.listen(PORT, () => {
+    const lanBase = resolveConfiguredLanBaseUrl();
+    console.log(`Diawi Local-First System active on port ${PORT}`);
+    if (lanBase) {
+        console.log(`[LAN] Tải nhanh nội bộ: ${lanBase} (set LAN_BASE_URL trong .env nếu cần)`);
+    } else {
+        console.log('[LAN] Không phát hiện IP LAN — chỉ phục vụ qua PUBLIC_BASE_URL.');
+    }
+});
 server.timeout = 600000;
 server.keepAliveTimeout = 600000;

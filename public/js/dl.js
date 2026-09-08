@@ -100,6 +100,13 @@ function renderQr(shareUrl, storedQr) {
     dlQr.appendChild(wrap);
 }
 
+tabIos.addEventListener('click', () => {
+    if (builds.ios) setActiveTab('ios');
+});
+tabAndroid.addEventListener('click', () => {
+    if (builds.android) setActiveTab('android');
+});
+
 function setActiveTab(platform) {
     activePlatform = platform;
     tabIos.classList.toggle('is-active', platform === 'ios');
@@ -109,7 +116,13 @@ function setActiveTab(platform) {
     renderBuild(builds[platform]);
 }
 
-function renderBuild(item) {
+function currentHostUrl(value) {
+    if (!value || typeof value !== 'string') return value;
+    if (window.LanTransfer) return window.LanTransfer.rewriteLegacyHost(value);
+    return value.replace(/share-ipa\.vunt\.info/g, window.location.host);
+}
+
+async function renderBuild(item) {
     if (!item) {
         dlVersion.textContent = 'Chưa có bản cho nền tảng này';
         dlPlatformBadge.textContent = activePlatform || '';
@@ -124,38 +137,53 @@ function renderBuild(item) {
     if (categoryName) setCategoryTitle(categoryName);
 
     const ver = item.version || '?';
-    const bn = item.buildNumber != null ? ` (${item.buildNumber})` : '';
+    const bn = item.buildNumber != null && item.buildNumber !== '' ? ` (${item.buildNumber})` : '';
     dlVersion.textContent = `Version ${ver}${bn}`;
 
     const platform = item.platform || activePlatform || 'ios';
     dlPlatformBadge.textContent = platform;
     dlPlatformBadge.className = `build-tag ${platform === 'android' ? 'build-tag-android' : 'build-tag-ios'}`;
 
-    renderQr(item.shareUrl, item.qr);
+    const shareUrl = currentHostUrl(item.shareUrl);
+    let downloadUrl = currentHostUrl(item.downloadUrl);
+    let viaLan = false;
+    if (window.LanTransfer) {
+        downloadUrl = await window.LanTransfer.preferDownloadUrl(item);
+        const lanBase = await window.LanTransfer.getLanBase();
+        viaLan = !!(lanBase && item.localFileAvailable && downloadUrl && downloadUrl !== item.downloadUrl);
+    }
+
+    renderQr(shareUrl, item.qr);
 
     dlInstallBtn.style.display = '';
-    dlInstallBtn.href = item.downloadUrl || item.shareUrl || '#';
+    dlInstallBtn.href = downloadUrl || shareUrl || '#';
     dlHowto.style.display = platform === 'ios' ? '' : 'none';
 
     if (platform === 'android') {
-        dlHint.textContent = isAndroidUa()
-            ? 'Nhấn Cài đặt để tải file APK.'
-            : 'Mở trang này trên thiết bị Android, hoặc quét QR bằng điện thoại.';
+        dlHint.textContent = viaLan
+            ? 'Đang dùng mạng nội bộ — tải nhanh hơn.'
+            : (isAndroidUa()
+                ? 'Nhấn Cài đặt để tải file APK.'
+                : 'Mở trang này trên thiết bị Android, hoặc quét QR bằng điện thoại.');
     } else {
-        dlHint.textContent = isIosUa()
-            ? 'Nhấn Cài đặt rồi Trust chứng chỉ trong Cài đặt nếu được hỏi.'
-            : 'Mở trang này trên iPhone/iPad, hoặc quét QR bằng Camera.';
+        dlHint.textContent = viaLan
+            ? 'Đang dùng mạng nội bộ — tải nhanh hơn.'
+            : (isIosUa()
+                ? 'Nhấn Cài đặt rồi Trust chứng chỉ trong Cài đặt nếu được hỏi.'
+                : 'Mở trang này trên iPhone/iPad, hoặc quét QR bằng Camera.');
     }
 }
 
 async function fetchBuild(id) {
     if (!id) return null;
-    const res = await fetch(`/api/app-info?id=${encodeURIComponent(id)}`);
-    const data = await res.json();
-    if (!res.ok || !data.success || !data.item) {
-        throw new Error(data.message || `Không tìm thấy bản build "${id}".`);
+    try {
+        const res = await fetch(`/api/app-info?id=${encodeURIComponent(id)}`);
+        const data = await res.json();
+        if (!res.ok || !data.success || !data.item) return null;
+        return data.item;
+    } catch (_) {
+        return null;
     }
-    return data.item;
 }
 
 async function init() {
@@ -166,6 +194,7 @@ async function init() {
     let productTitle = '';
     let productBanner = '';
     let productIcon = '';
+    let shareMeta = null;
 
     if (shareId) {
         try {
@@ -174,11 +203,12 @@ async function init() {
             if (!res.ok || !data.success || !data.item) {
                 throw new Error(data.message || 'Không tìm thấy link chia sẻ.');
             }
+            shareMeta = data.item;
             iosId = data.item.iosBuildId || '';
             androidId = data.item.androidBuildId || '';
             productTitle = data.item.productName || '';
-            productBanner = data.item.productBanner || '';
-            productIcon = data.item.productIcon || '';
+            productBanner = currentHostUrl(data.item.productBanner || '');
+            productIcon = currentHostUrl(data.item.productIcon || '');
             setCategoryTitle(productTitle);
             setCategoryIcon(productIcon, productTitle);
         } catch (err) {
@@ -212,6 +242,21 @@ async function init() {
             if (!item) continue;
             if ((item.platform || 'ios') === 'android') builds.android = item;
             else builds.ios = item;
+        }
+
+        if (shareMeta) {
+            if (builds.ios) {
+                if (!builds.ios.version && shareMeta.iosVersion) builds.ios.version = shareMeta.iosVersion;
+                if (builds.ios.buildNumber == null && shareMeta.iosBuildNumber) {
+                    builds.ios.buildNumber = shareMeta.iosBuildNumber;
+                }
+            }
+            if (builds.android) {
+                if (!builds.android.version && shareMeta.androidVersion) builds.android.version = shareMeta.androidVersion;
+                if (builds.android.buildNumber == null && shareMeta.androidBuildNumber) {
+                    builds.android.buildNumber = shareMeta.androidBuildNumber;
+                }
+            }
         }
 
         if (!builds.ios && !builds.android) {
@@ -251,12 +296,5 @@ async function init() {
         setCategoryIcon(productIcon, productTitle);
     }
 }
-
-tabIos.addEventListener('click', () => {
-    if (builds.ios) setActiveTab('ios');
-});
-tabAndroid.addEventListener('click', () => {
-    if (builds.android) setActiveTab('android');
-});
 
 init();

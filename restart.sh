@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Restart Share-IPA: cloudflared tunnel + node server + Caddy
+set -euo pipefail
+
+APP_DIR="/Users/sds/dev/share_ipa"
+cd "$APP_DIR"
+
+if [[ ! -f .env ]]; then
+  echo "❌ Thiếu file .env trong $APP_DIR"
+  echo "   Thêm dòng: CLOUDFLARED_TOKEN=..."
+  exit 1
+fi
+
+set -a
+# shellcheck disable=SC1091
+source .env
+set +a
+
+if [[ -z "${CLOUDFLARED_TOKEN:-}" ]]; then
+  echo "❌ Thiếu CLOUDFLARED_TOKEN trong .env"
+  exit 1
+fi
+
+mkdir -p logs
+PID_DIR="$APP_DIR/logs"
+
+echo "==> Dừng process cũ..."
+if [[ -f "$PID_DIR/cloudflared.pid" ]]; then
+  kill "$(cat "$PID_DIR/cloudflared.pid")" 2>/dev/null || true
+  rm -f "$PID_DIR/cloudflared.pid"
+fi
+if [[ -f "$PID_DIR/server.pid" ]]; then
+  kill "$(cat "$PID_DIR/server.pid")" 2>/dev/null || true
+  rm -f "$PID_DIR/server.pid"
+fi
+
+pkill -f "cloudflared tunnel run --token" 2>/dev/null || true
+pkill -f "node server.js" 2>/dev/null || true
+sudo caddy stop 2>/dev/null || true
+sleep 1
+
+echo "==> Chạy cloudflared tunnel..."
+nohup cloudflared tunnel run --token "$CLOUDFLARED_TOKEN" \
+  > "$PID_DIR/cloudflared.log" 2>&1 &
+echo $! > "$PID_DIR/cloudflared.pid"
+
+echo "==> npm install..."
+npm install
+
+echo "==> Chạy node server.js..."
+nohup node server.js > "$PID_DIR/server.log" 2>&1 &
+echo $! > "$PID_DIR/server.pid"
+
+echo "==> Caddy validate + start..."
+sudo caddy validate --config ./Caddyfile
+sudo caddy start --config ./Caddyfile
+
+echo ""
+echo "✅ Share-IPA đã restart."
+echo "   cloudflared pid: $(cat "$PID_DIR/cloudflared.pid")"
+echo "   server      pid: $(cat "$PID_DIR/server.pid")"
+echo "   logs: $PID_DIR/cloudflared.log , $PID_DIR/server.log"
+echo "   Kiểm tra: curl -s http://127.0.0.1:3000/api/lan-info | head -c 200; echo"

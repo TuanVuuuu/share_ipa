@@ -121,6 +121,9 @@
             qrModalVersion.innerText = `${item.bundleId || ''} • v${item.version} (Build ${item.buildNumber})`;
             qrModalUrl.value = item.shareUrl || '';
             qrModalInstall.href = item.downloadUrl || '#';
+            if (window.LanTransfer) {
+                window.LanTransfer.applyDownloadHref(qrModalInstall, item);
+            }
 
             // Cập nhật thẻ thông tin bổ sung trong modal
             qrModal.querySelectorAll('.qr-modal-meta, .devices-details').forEach(el => el.remove());
@@ -206,11 +209,15 @@
                     </div>
                     <div class="build-actions">
                         <button type="button" class="btn secondary qr-btn">Xem QR</button>
-                        <a class="btn install-mini" href="${escapeHtml(build.downloadUrl)}">Cài đặt</a>
+                        <a class="btn install-mini" href="${escapeHtml(build.downloadUrl || '#')}">Cài đặt</a>
                         ${showDelete ? '<button type="button" class="btn danger delete-build-btn">Xóa</button>' : ''}
                     </div>
                 `;
                 row.querySelector('.qr-btn').addEventListener('click', () => openQrModal(build));
+                const installLink = row.querySelector('.install-mini');
+                if (installLink && window.LanTransfer) {
+                    window.LanTransfer.applyDownloadHref(installLink, build);
+                }
                 const deleteBtn = row.querySelector('.delete-build-btn');
                 if (deleteBtn) {
                     deleteBtn.addEventListener('click', () => onDeleteBuild(build));
