@@ -35,7 +35,17 @@ if [[ -f "$PID_DIR/server.pid" ]]; then
 fi
 
 pkill -f "cloudflared tunnel run --token" 2>/dev/null || true
-pkill -f "node server.js" 2>/dev/null || true
+pkill -9 -f "node server.js" 2>/dev/null || true
+
+# Giải phóng cổng 3000/3080 nếu còn process chiếm
+for port in 3000 3080; do
+  pids="$(lsof -t -nP -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -n "${pids}" ]]; then
+    echo "   Kill process đang giữ :$port -> $pids"
+    kill -9 $pids 2>/dev/null || true
+  fi
+done
+
 sudo caddy stop 2>/dev/null || true
 sleep 1
 

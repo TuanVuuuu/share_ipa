@@ -1,5 +1,6 @@
 const path = require('path');
 const os = require('os');
+const http = require('http');
 
 require('dotenv').config({
     path: path.join(__dirname, '.env')
@@ -2189,10 +2190,70 @@ function listRegisteredApiRoutes() {
     }
 }
 
-const server = app.listen(PORT, '0.0.0.0', () => {
+function tryHandleLanRequest(req, res) {
+    const method = req.method || 'GET';
+    if (method !== 'GET' && method !== 'OPTIONS') return false;
+    let pathname = '/';
+    try {
+        pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
+    } catch (_) {
+        pathname = String(req.url || '/').split('?')[0] || '/';
+    }
+    if (
+        pathname !== '/api/lan-info'
+        && pathname !== '/api/lan'
+        && pathname !== '/api/lan-ping'
+        && pathname !== '/api/lan-pixel'
+    ) {
+        return false;
+    }
+
+    if (method === 'OPTIONS') {
+        setLanCors(res);
+        res.writeHead(204);
+        res.end();
+        return true;
+    }
+    if (pathname === '/api/lan-ping') {
+        setLanCors(res);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: true, t: Date.now() }));
+        return true;
+    }
+    if (pathname === '/api/lan-pixel') {
+        setLanCors(res);
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+        res.end(LAN_PIXEL_PNG);
+        return true;
+    }
+
+    const baseUrl = resolveConfiguredLanBaseUrl();
+    const candidates = getLanCandidateBaseUrls();
+    const body = {
+        success: true,
+        enabled: !!baseUrl,
+        baseUrl: baseUrl || null,
+        candidates,
+        addresses: getLanIpv4Addresses(),
+        publicBaseUrl: PUBLIC_BASE_URL,
+        viaLanHost: false,
+        pid: process.pid,
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(body));
+    return true;
+}
+
+// Bắt /api/lan* ở tầng http.Server — trước Express — để tránh lỗi match route
+const server = http.createServer((req, res) => {
+    if (tryHandleLanRequest(req, res)) return;
+    return app(req, res);
+});
+
+server.listen(PORT, '0.0.0.0', () => {
     const lanBase = resolveConfiguredLanBaseUrl();
     const candidates = getLanCandidateBaseUrls();
-    console.log(`Diawi Local-First System active on port ${PORT}`);
+    console.log(`Diawi Local-First System active on port ${PORT} (pid ${process.pid})`);
     if (lanBase) {
         console.log(`[LAN] Tải nhanh nội bộ: ${lanBase} (set LAN_BASE_URL trong .env nếu cần)`);
         if (candidates.length > 1) {
@@ -2204,12 +2265,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 
     const apiRoutes = listRegisteredApiRoutes();
     const lanRoutes = apiRoutes.filter((r) => r.includes('/api/lan'));
-    console.log(`[LAN] Routes đã gắn: ${lanRoutes.length ? lanRoutes.join(' | ') : '(KHÔNG CÓ — lỗi đăng ký)'}`);
+    console.log(`[LAN] Express routes: ${lanRoutes.length ? lanRoutes.join(' | ') : '(none)'}`);
 
-    // Self-check: xác nhận process này thật sự trả lời /api/lan-info
     httpGetJson(`http://127.0.0.1:${PORT}/api/lan-info`)
         .then((body) => {
-            console.log('[LAN] Self-check OK:', body && body.baseUrl ? body.baseUrl : body);
+            console.log('[LAN] Self-check OK:', body && body.baseUrl ? body.baseUrl : body, 'pid=', body && body.pid);
         })
         .catch((err) => {
             console.error('[LAN] Self-check FAIL:', err.message);
@@ -2220,16 +2280,15 @@ server.keepAliveTimeout = 600000;
 
 function httpGetJson(url) {
     return new Promise((resolve, reject) => {
-        const lib = require('http');
-        const req = lib.get(url, { timeout: 3000 }, (res) => {
+        const req = http.get(url, { timeout: 3000 }, (res) => {
             let raw = '';
             res.on('data', (c) => { raw += c; });
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     try { resolve(JSON.parse(raw)); }
-                    catch (e) { reject(new Error(`JSON parse fail: ${raw.slice(0, 120)}`)); }
+                    catch (e) { reject(new Error(`JSON parse fail: ${raw.slice(0, 200)}`)); }
                 } else {
-                    reject(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 120)}`));
+                    reject(new Error(`HTTP ${res.statusCode}: ${raw.replace(/\s+/g, ' ').slice(0, 200)}`));
                 }
             });
         });
