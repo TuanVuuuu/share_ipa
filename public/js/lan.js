@@ -167,9 +167,16 @@
             return global.location.origin;
         }
 
-        const candidates = Array.isArray(info.candidates) && info.candidates.length
-            ? info.candidates
-            : (info.baseUrl ? [info.baseUrl] : []);
+        const candidates = [];
+        const seen = new Set();
+        const add = (u) => {
+            if (!u || seen.has(u)) return;
+            seen.add(u);
+            candidates.push(u);
+        };
+        // Ưu tiên LAN_BASE_URL từ server (vd http://192.168.1.105:3080)
+        if (info.baseUrl) add(info.baseUrl);
+        if (Array.isArray(info.candidates)) info.candidates.forEach(add);
 
         const probes = await Promise.all(candidates.map(async (url) => {
             try {
@@ -195,7 +202,8 @@
         return null;
     }
 
-    function getLanBase() {
+    function getLanBase(opts) {
+        if (opts && opts.force) cachedPromise = null;
         if (!cachedPromise) cachedPromise = resolveLanBase();
         return cachedPromise;
     }

@@ -1,12 +1,15 @@
 share-ipa.vunt.site {
 	tls internal
-	reverse_proxy localhost:3081
+	reverse_proxy localhost:3081 {
+		flush_interval -1
+	}
 }
 
 # LAN HTTP — tải/upload nhanh trong mạng nội bộ.
 # .env: LAN_BASE_URL=http://<IP-LAN>:3080
-# Ví dụ: LAN_BASE_URL=http://192.168.1.105:3080
-# Node app lắng nghe 127.0.0.1:3081 (tránh trùng Jenkins :3000)
+# Node lắng nghe 0.0.0.0:3081 — client có thể upload thẳng :3081 (bỏ qua Caddy).
 http://:3080 {
-	reverse_proxy localhost:3081
+	reverse_proxy localhost:3081 {
+		flush_interval -1
+	}
 }

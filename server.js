@@ -26,7 +26,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '32';
+const ASSET_VERSION = process.env.ASSET_VERSION || '35';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -115,6 +115,8 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3081;
 const AUTH_COOKIE_NAME = 'share_ipa_auth';
 
+const { execFileSync } = require('child_process');
+
 function lanIpPriority(ip) {
     const host = String(ip || '').replace(/^::ffff:/, '');
     if (/^192\.168\./.test(host)) return 0;
@@ -128,7 +130,66 @@ function lanIpPriority(ip) {
     return 9;
 }
 
-function getLanIpv4Addresses() {
+function kindFromHardwarePort(portName) {
+    const p = String(portName || '').toLowerCase();
+    if (/wi-?fi|airport/.test(p)) return 'wifi';
+    if (/thunderbolt bridge/.test(p)) return 'bridge';
+    if (/ethernet|usb.*lan|\blan\b/.test(p)) return 'ethernet';
+    if (/thunderbolt/.test(p)) return 'thunderbolt';
+    return 'other';
+}
+
+function ifaceKindPriority(kind) {
+    if (kind === 'ethernet') return 0;
+    if (kind === 'bridge') return 1;
+    if (kind === 'thunderbolt') return 2;
+    if (kind === 'other') return 3;
+    if (kind === 'wifi') return 5;
+    return 4;
+}
+
+let _darwinIfaceKindCache = null;
+function loadDarwinIfaceKinds() {
+    if (_darwinIfaceKindCache) return _darwinIfaceKindCache;
+    const map = new Map();
+    if (process.platform !== 'darwin') {
+        _darwinIfaceKindCache = map;
+        return map;
+    }
+    try {
+        const out = execFileSync('networksetup', ['-listallhardwareports'], {
+            encoding: 'utf8',
+            timeout: 3000,
+        });
+        let currentPort = '';
+        for (const line of out.split('\n')) {
+            const portMatch = line.match(/^Hardware Port:\s*(.+)\s*$/);
+            if (portMatch) {
+                currentPort = portMatch[1].trim();
+                continue;
+            }
+            const devMatch = line.match(/^Device:\s*(\S+)\s*$/);
+            if (devMatch && currentPort) {
+                map.set(devMatch[1], kindFromHardwarePort(currentPort));
+            }
+        }
+    } catch (_) { /* ignore */ }
+    _darwinIfaceKindCache = map;
+    return map;
+}
+
+function classifyIface(name) {
+    const kinds = loadDarwinIfaceKinds();
+    if (kinds.has(name)) return kinds.get(name);
+    const n = String(name || '').toLowerCase();
+    if (/wi-?fi|wlan|airport/.test(n)) return 'wifi';
+    if (/^eth\d+$|^en\d+$/.test(n)) return 'other';
+    if (/usb|lan/.test(n)) return 'ethernet';
+    return 'other';
+}
+
+function getLanIfaceEntries() {
+    const preferIface = (process.env.LAN_IFACE || '').trim();
     const nets = os.networkInterfaces();
     const out = [];
     for (const name of Object.keys(nets || {})) {
@@ -136,18 +197,36 @@ function getLanIpv4Addresses() {
             const family = net.family === 4 || net.family === 'IPv4';
             if (!family || net.internal || !net.address) continue;
             if (/^169\.254\./.test(net.address)) continue;
-            out.push(net.address);
+            const kind = classifyIface(name);
+            out.push({
+                address: net.address,
+                iface: name,
+                kind,
+                forced: !!(preferIface && name === preferIface),
+            });
         }
     }
-    out.sort((a, b) => lanIpPriority(a) - lanIpPriority(b) || a.localeCompare(b));
+    out.sort((a, b) => {
+        if (a.forced !== b.forced) return a.forced ? -1 : 1;
+        const kindDiff = ifaceKindPriority(a.kind) - ifaceKindPriority(b.kind);
+        if (kindDiff) return kindDiff;
+        const ipDiff = lanIpPriority(a.address) - lanIpPriority(b.address);
+        if (ipDiff) return ipDiff;
+        return a.address.localeCompare(b.address);
+    });
     return out;
+}
+
+function getLanIpv4Addresses() {
+    return getLanIfaceEntries().map((e) => e.address);
 }
 
 function resolveConfiguredLanBaseUrl() {
     if (LAN_BASE_URL) return LAN_BASE_URL;
-    const ips = getLanIpv4Addresses();
-    if (!ips.length) return '';
-    return `http://${ips[0]}:${PORT}`;
+    const entries = getLanIfaceEntries();
+    if (!entries.length) return '';
+    // Caddy LAN cổng 3080; ưu tiên Ethernet trước Wi-Fi
+    return `http://${entries[0].address}:3080`;
 }
 
 function getLanCandidateBaseUrls() {
@@ -159,9 +238,10 @@ function getLanCandidateBaseUrls() {
         urls.push(u);
     };
     if (LAN_BASE_URL) add(LAN_BASE_URL);
-    for (const ip of getLanIpv4Addresses()) {
-        add(`http://${ip}:${PORT}`);
-        if (Number(PORT) !== 3080) add(`http://${ip}:3080`);
+    for (const entry of getLanIfaceEntries()) {
+        // Ưu tiên Caddy :3080 (web LAN), rồi Node :PORT
+        add(`http://${entry.address}:3080`);
+        if (Number(PORT) !== 3080) add(`http://${entry.address}:${PORT}`);
     }
     return urls;
 }
@@ -301,6 +381,11 @@ function sendLanInfo(req, res) {
         baseUrl: baseUrl || null,
         candidates,
         addresses: getLanIpv4Addresses(),
+        interfaces: getLanIfaceEntries().map((e) => ({
+            iface: e.iface,
+            kind: e.kind,
+            address: e.address,
+        })),
         publicBaseUrl: PUBLIC_BASE_URL,
         viaLanHost: isLanRequest(req),
     });
@@ -714,6 +799,10 @@ app.post('/api/logout', (req, res) => {
 
 // Chỉ bảo vệ các API nhạy cảm phía sau — đẩy bản build yêu cầu quyền 'upload_build'
 app.use('/api/upload-secure', requirePermission('upload_build'));
+app.use('/api/upload-lan', (req, res, next) => {
+    if (req.method === 'OPTIONS') return next();
+    return requirePermission('upload_build')(req, res, next);
+});
 app.use('/api/upload-chunk', requirePermission('upload_build'));
 app.use('/api/upload-finalize', requirePermission('upload_build'));
 app.use('/api/logs', requirePermission('upload_build'));
@@ -1860,6 +1949,97 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
     });
 });
 
+// LAN nhanh: body thô (không multipart) → stream thẳng ra đĩa, xử lý nền.
+app.options('/api/upload-lan', (req, res) => {
+    const origin = (req.headers.origin || '').toString();
+    if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-File-Name');
+    res.status(204).end();
+});
+
+app.post('/api/upload-lan', (req, res) => {
+    const origin = (req.headers.origin || '').toString();
+    if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
+    const rawName = decodeURIComponent((req.headers['x-file-name'] || 'app.ipa').toString());
+    const safeName = path.basename(rawName).replace(/[^\w.\-]/g, '_') || 'app.ipa';
+    const finalFilename = `app_${Date.now()}_${safeName}`;
+    const finalPath = path.join(UPLOADS_MAIN_DIR, finalFilename);
+    const expected = Number(req.headers['content-length'] || 0);
+    const t0 = Date.now();
+    let received = 0;
+
+    logToUI(
+        `📡 LAN raw upload bắt đầu: ${safeName}${expected ? ` (${formatBytes(expected)})` : ''} → stream ra đĩa`,
+        'info'
+    );
+
+    const ws = fs.createWriteStream(finalPath);
+    req.on('data', (chunk) => { received += chunk.length; });
+    req.on('aborted', () => {
+        ws.destroy();
+        fs.promises.unlink(finalPath).catch(() => {});
+        logToUI('❌ LAN upload bị ngắt giữa chừng.', 'error');
+    });
+    req.pipe(ws);
+
+    ws.on('error', (err) => {
+        logToUI(`❌ Lỗi ghi đĩa LAN upload: ${err.message}`, 'error');
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, message: `Lỗi ghi đĩa: ${err.message}` });
+        }
+    });
+
+    ws.on('finish', async () => {
+        const ms = Date.now() - t0;
+        const mbps = received > 0 && ms > 0 ? ((received * 8) / (ms / 1000) / 1e6).toFixed(1) : '?';
+        const mBps = received > 0 && ms > 0 ? ((received / (1024 * 1024)) / (ms / 1000)).toFixed(1) : '?';
+        await logRealtime(
+            `📡 LAN raw xong: ${formatBytes(received)} trong ${(ms / 1000).toFixed(1)}s (~${mBps} MB/s / ${mbps} Mbps)`,
+            'success'
+        );
+
+        const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        jobStore.set(jobId, { status: 'pending', createdAt: Date.now() });
+        const uploadedBy = getSessionUser(req)?.username || null;
+        res.json({ success: true, status: 'pending', jobId, bytes: received, elapsedMs: ms });
+
+        (async () => {
+            try {
+                const mockRes = {
+                    _statusCode: 200, _body: null,
+                    status(c) { this._statusCode = c; return this; },
+                    json(b) { this._body = b; },
+                };
+                await processUploadedIpa(mockRes, {
+                    finalFilename,
+                    finalPath,
+                    fileSizeBytes: received,
+                    uploadedBy,
+                });
+                if (mockRes._statusCode >= 200 && mockRes._statusCode < 300 && mockRes._body?.success) {
+                    jobStore.set(jobId, { status: 'done', result: mockRes._body, createdAt: Date.now() });
+                } else {
+                    const errMsg = mockRes._body?.message || 'Lỗi xử lý file sau LAN upload.';
+                    jobStore.set(jobId, { status: 'error', error: errMsg, createdAt: Date.now() });
+                    fs.promises.unlink(finalPath).catch(() => {});
+                }
+            } catch (err) {
+                jobStore.set(jobId, { status: 'error', error: err.message, createdAt: Date.now() });
+                fs.promises.unlink(finalPath).catch(() => {});
+                logToUI(`❌ LAN processing failed: ${err.message}`, 'error');
+            }
+        })();
+    });
+});
+
 // Upload chunk: mỗi request nhỏ để không chạm timeout 100s của Cloudflare.
 app.post('/api/upload-chunk', chunkUpload.single('chunk'), async (req, res) => {
     try {
@@ -2242,6 +2422,11 @@ function tryHandleLanRequest(req, res) {
         baseUrl: baseUrl || null,
         candidates,
         addresses: getLanIpv4Addresses(),
+        interfaces: getLanIfaceEntries().map((e) => ({
+            iface: e.iface,
+            kind: e.kind,
+            address: e.address,
+        })),
         publicBaseUrl: PUBLIC_BASE_URL,
         viaLanHost: false,
         pid: process.pid,
@@ -2266,14 +2451,20 @@ server.on('error', (err) => {
     process.exit(1);
 });
 
-// Chỉ listen localhost — Caddy (:3080) và cloudflared proxy vào đây.
-// Tránh bind 0.0.0.0 (dễ EADDRINUSE / lệch IPv4 vs IPv6 với process cũ).
-server.listen(PORT, '127.0.0.1', () => {
+// Listen mọi interface :3081 — client LAN upload thẳng, không cần qua Caddy :3080.
+server.listen(PORT, '0.0.0.0', () => {
     const lanBase = resolveConfiguredLanBaseUrl();
     const candidates = getLanCandidateBaseUrls();
+    const ifaces = getLanIfaceEntries();
     console.log(`Diawi Local-First System active on port ${PORT} (pid ${process.pid})`);
+    if (ifaces.length) {
+        console.log('[LAN] Interfaces (ưu tiên Ethernet → Wi-Fi):');
+        for (const e of ifaces) {
+            console.log(`       ${e.iface} [${e.kind}] ${e.address}${e.forced ? ' (LAN_IFACE)' : ''}`);
+        }
+    }
     if (lanBase) {
-        console.log(`[LAN] Tải nhanh nội bộ: ${lanBase} (set LAN_BASE_URL trong .env nếu cần)`);
+        console.log(`[LAN] Tải nhanh nội bộ: ${lanBase}${LAN_BASE_URL ? ' (từ .env LAN_BASE_URL)' : ' (auto)'}`);
         if (candidates.length > 1) {
             console.log('[LAN] Ứng viên:', candidates.join(', '));
         }

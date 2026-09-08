@@ -163,6 +163,7 @@ function applyAuthState(authenticated) {
         if (showCatalog) loadCatalog();
         else setCatalogLoading(false);
         if (canDownloadLink) loadDownloadProductsHome();
+        refreshLanBanner();
     } else {
         setCatalogLoading(false);
         clearTimeout(logsReconnectTimer);
@@ -170,6 +171,7 @@ function applyAuthState(authenticated) {
             logsSource.close();
             logsSource = null;
         }
+        hideLanBanner();
     }
 }
 
@@ -573,38 +575,55 @@ logoutBtn.addEventListener('click', async () => {
 });
 
 checkAuthStatus();
-refreshLanBanner();
+
+function hideLanBanner() {
+    const banner = document.getElementById('lan-banner');
+    if (!banner) return;
+    banner.style.display = 'none';
+    banner.hidden = true;
+}
 
 async function refreshLanBanner() {
     const banner = document.getElementById('lan-banner');
     const text = document.getElementById('lan-banner-text');
     const link = document.getElementById('lan-banner-link');
-    if (!banner || !text || !window.LanTransfer) return;
+    if (!banner || !text || !link || !window.LanTransfer) return;
+    if (!isAuthenticated) {
+        hideLanBanner();
+        return;
+    }
 
     try {
-        const lanBase = await window.LanTransfer.getLanBase();
+        text.textContent = 'Đang kiểm tra mạng nội bộ (LAN)...';
+        banner.hidden = false;
+        banner.style.display = '';
+        banner.classList.remove('is-active');
+        link.style.display = 'none';
+
+        // Sau login: ping lại LAN (vd http://192.168.1.105:3080)
+        const lanBase = await window.LanTransfer.getLanBase({ force: true });
         if (!lanBase) {
-            banner.style.display = 'none';
-            banner.hidden = true;
+            hideLanBanner();
             return;
         }
 
-        const canUpload = await window.LanTransfer.canUploadLocally();
-        banner.hidden = false;
-        banner.style.display = '';
-        if (canUpload) {
+        const alreadyOnLan = await window.LanTransfer.canUploadLocally();
+        if (alreadyOnLan) {
             banner.classList.add('is-active');
-            text.textContent = 'Đang dùng mạng nội bộ — upload và tải file không qua R2.';
+            text.textContent = `Đang dùng mạng LAN (${lanBase}) — upload/tải nhanh, không qua R2.`;
             link.style.display = 'none';
-        } else {
-            banner.classList.remove('is-active');
-            text.textContent = 'Máy bạn cùng mạng với máy chủ. Mở bản nội bộ để upload/tải nhanh, không qua R2.';
-            link.href = lanBase;
-            link.style.display = '';
+            return;
         }
+
+        banner.classList.remove('is-active');
+        text.textContent = `Máy bạn cùng mạng với máy chủ. Ping OK tới ${lanBase} — chuyển sang để upload/tải nhanh hơn nhiều.`;
+        link.href = lanBase;
+        link.textContent = 'Chuyển sang web LAN';
+        link.style.display = '';
+        link.target = '_self';
+        link.rel = 'noopener';
     } catch (_) {
-        banner.style.display = 'none';
-        banner.hidden = true;
+        hideLanBanner();
     }
 }
 
@@ -893,15 +912,31 @@ async function uploadSecure(file) {
     return uploadViaChunks(file, startedAt);
 }
 
-// LAN: 1 request duy nhất → đĩa máy chủ. Không chia chunk (chunk chỉ cần khi đi Tunnel).
+// LAN: raw body → đĩa, có thể đi thẳng Node :3081 (bỏ Caddy) cho nhanh hơn.
 async function uploadViaLanDirect(file, startedAt) {
     try {
         armStallWatch();
         _recordSpeedSample();
-        setActivity('LAN direct upload — 1 luồng TCP nội bộ...', 'active');
 
-        await new Promise((resolve, reject) => {
+        let uploadUrl = '/api/upload-lan';
+        try {
+            const lanBase = window.LanTransfer && await window.LanTransfer.getLanBase();
+            if (lanBase) {
+                const u = new URL(lanBase);
+                // Caddy LAN :3080 → Node :3081; upload thẳng Node để tránh proxy buffer
+                if (u.port === '3080' || u.port === '') {
+                    uploadUrl = `${u.protocol}//${u.hostname}:3081/api/upload-lan`;
+                } else if (isPrivateHost(u.hostname)) {
+                    uploadUrl = `${u.origin}/api/upload-lan`;
+                }
+            }
+        } catch (_) { /* same-origin fallback */ }
+
+        setActivity(`LAN raw upload → ${uploadUrl}...`, 'active');
+
+        const sendRaw = (url) => new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
+            xhr.withCredentials = true;
             xhr.upload.addEventListener('progress', (e) => {
                 if (!e.lengthComputable) return;
                 _uploadCompletedBytes = 0;
@@ -914,13 +949,7 @@ async function uploadViaLanDirect(file, startedAt) {
                 let data = null;
                 try { data = JSON.parse(xhr.responseText); } catch (_) {}
                 if (xhr.status >= 200 && xhr.status < 300 && data && data.success) {
-                    _uploadCompletedBytes = file.size;
-                    delete _uploadInFlightBytes[0];
-                    clearStallWatch();
-                    clearInterval(progressTimer);
-                    updateProgress(100, 'Máy chủ đã nhận xong — đang hoàn tất...');
-                    renderSuccess(data, startedAt);
-                    resolve();
+                    resolve(data);
                 } else {
                     reject(new Error((data && data.message) || `Upload LAN thất bại (HTTP ${xhr.status}).`));
                 }
@@ -928,17 +957,50 @@ async function uploadViaLanDirect(file, startedAt) {
             xhr.addEventListener('error', () => reject(new Error('Lỗi mạng khi upload LAN.')));
             xhr.addEventListener('timeout', () => reject(new Error('Upload LAN timeout.')));
             xhr.timeout = 30 * 60 * 1000;
-
-            const formData = new FormData();
-            formData.append('ipaFile', file, file.name);
-            xhr.open('POST', '/api/upload-secure');
-            xhr.send(formData);
+            xhr.open('POST', url);
+            xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+            xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
+            xhr.send(file);
         });
+
+        let fin;
+        try {
+            fin = await sendRaw(uploadUrl);
+        } catch (firstErr) {
+            if (uploadUrl !== '/api/upload-lan') {
+                setActivity('LAN :3081 lỗi — fallback qua Caddy :3080...', 'active');
+                fin = await sendRaw('/api/upload-lan');
+            } else {
+                throw firstErr;
+            }
+        }
+
+        _uploadCompletedBytes = file.size;
+        delete _uploadInFlightBytes[0];
+        clearStallWatch();
+        updateProgress(92, 'Máy chủ đã nhận xong — đang phân tích...');
+        setActivity('LAN đã nhận đủ dữ liệu — máy chủ đang xử lý...', 'active');
+
+        if (fin.jobId) {
+            const result = await _pollJobResult(fin.jobId);
+            clearInterval(progressTimer);
+            renderSuccess(result, startedAt);
+        } else {
+            clearInterval(progressTimer);
+            renderSuccess(fin, startedAt);
+        }
     } catch (err) {
         clearInterval(progressTimer);
         clearStallWatch();
         failUpload(err.message || 'Không thể upload qua LAN.');
     }
+}
+
+function isPrivateHost(hostname) {
+    if (window.LanTransfer && window.LanTransfer.isPrivateHostname) {
+        return window.LanTransfer.isPrivateHostname(hostname);
+    }
+    return false;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
