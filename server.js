@@ -2252,14 +2252,16 @@ const server = http.createServer((req, res) => {
 
 server.on('error', (err) => {
     if (err && err.code === 'EADDRINUSE') {
-        console.error(`[FATAL] Cổng ${PORT} đang bị chiếm (EADDRINUSE). Chạy: lsof -nP -iTCP:${PORT} -sTCP:LISTEN`);
+        console.error(`[FATAL] Cổng ${PORT} đang bị chiếm (EADDRINUSE). Chạy: sudo lsof -nP -iTCP:${PORT} -sTCP:LISTEN`);
     } else {
         console.error('[FATAL] HTTP server error:', err);
     }
     process.exit(1);
 });
 
-server.listen(PORT, '0.0.0.0', () => {
+// Chỉ listen localhost — Caddy (:3080) và cloudflared proxy vào đây.
+// Tránh bind 0.0.0.0 (dễ EADDRINUSE / lệch IPv4 vs IPv6 với process cũ).
+server.listen(PORT, '127.0.0.1', () => {
     const lanBase = resolveConfiguredLanBaseUrl();
     const candidates = getLanCandidateBaseUrls();
     console.log(`Diawi Local-First System active on port ${PORT} (pid ${process.pid})`);

@@ -28,23 +28,26 @@ PORT_NUM="${PORT:-3000}"
 free_port() {
   local port="$1"
   local attempt pids
-  for attempt in 1 2 3 4 5; do
+  for attempt in 1 2 3 4 5 6 7 8; do
     pids="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -z "${pids}" ]]; then
+      pids="$(sudo lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    fi
     if [[ -z "${pids}" ]]; then
       return 0
     fi
     echo "   [:$port] đang bị chiếm bởi PID: $pids (lần $attempt) — kill -9"
     # shellcheck disable=SC2086
     kill -9 $pids 2>/dev/null || true
-    sleep 0.5
+    # shellcheck disable=SC2086
+    sudo kill -9 $pids 2>/dev/null || true
+    sleep 0.6
   done
-  pids="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
-  if [[ -n "${pids}" ]]; then
-    echo "❌ Không giải phóng được cổng $port. Process còn giữ:"
-    lsof -nP -iTCP:"$port" -sTCP:LISTEN || true
-    return 1
-  fi
-  return 0
+  echo "❌ Không giải phóng được cổng $port. Process còn giữ:"
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+  sudo lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+  netstat -anv 2>/dev/null | grep -E "\.${port} .*LISTEN" || true
+  return 1
 }
 
 echo "==> Dừng process cũ..."
