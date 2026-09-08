@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Restart Share-IPA: cloudflared tunnel + node server + Caddy
+# Chỉ dừng process của Share-IPA — KHÔNG kill process lạ trên cổng (tránh đụng Jenkins).
 set -euo pipefail
 
 APP_DIR="/Users/sds/dev/share_ipa"
@@ -25,51 +26,52 @@ mkdir -p logs
 PID_DIR="$APP_DIR/logs"
 PORT_NUM="${PORT:-3081}"
 
-free_port() {
-  local port="$1"
-  local attempt pids
-  for attempt in 1 2 3 4 5 6 7 8; do
-    pids="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
-    if [[ -z "${pids}" ]]; then
-      pids="$(sudo lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+kill_pidfile() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    local pid
+    pid="$(cat "$file" 2>/dev/null || true)"
+    if [[ -n "${pid}" ]] && kill -0 "$pid" 2>/dev/null; then
+      echo "   stop pid $pid ($file)"
+      kill "$pid" 2>/dev/null || true
+      sleep 0.3
+      kill -9 "$pid" 2>/dev/null || true
     fi
-    if [[ -z "${pids}" ]]; then
-      return 0
-    fi
-    echo "   [:$port] đang bị chiếm bởi PID: $pids (lần $attempt) — kill -9"
-    # shellcheck disable=SC2086
-    kill -9 $pids 2>/dev/null || true
-    # shellcheck disable=SC2086
-    sudo kill -9 $pids 2>/dev/null || true
-    sleep 0.6
-  done
-  echo "❌ Không giải phóng được cổng $port. Process còn giữ:"
-  lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
-  sudo lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
-  netstat -anv 2>/dev/null | grep -E "\.${port} .*LISTEN" || true
-  return 1
+    rm -f "$file"
+  fi
 }
 
-echo "==> Dừng process cũ..."
-if [[ -f "$PID_DIR/cloudflared.pid" ]]; then
-  kill "$(cat "$PID_DIR/cloudflared.pid")" 2>/dev/null || true
-  rm -f "$PID_DIR/cloudflared.pid"
-fi
-if [[ -f "$PID_DIR/server.pid" ]]; then
-  kill "$(cat "$PID_DIR/server.pid")" 2>/dev/null || true
-  rm -f "$PID_DIR/server.pid"
-fi
+# Chỉ báo cáo nếu cổng bận — không kill process người khác
+assert_port_free() {
+  local port="$1"
+  local pids
+  pids="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -n "${pids}" ]]; then
+    echo "❌ Cổng $port đang bị chiếm bởi PID: $pids"
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN || true
+    echo "   Không tự kill (an toàn cho Jenkins/dịch vụ khác)."
+    echo "   Nếu chắc là Share-IPA cũ: kill đúng PID ở trên, rồi chạy lại ./restart.sh"
+    return 1
+  fi
+  return 0
+}
 
+echo "==> Dừng process Share-IPA cũ (theo pidfile + đúng path)..."
+kill_pidfile "$PID_DIR/cloudflared.pid"
+kill_pidfile "$PID_DIR/server.pid"
+
+# Chỉ dừng đúng Share-IPA — không pkill mọi "node server.js" trên máy
 pkill -f "cloudflared tunnel run --token" 2>/dev/null || true
-pkill -9 -f "node server.js" 2>/dev/null || true
-pkill -9 -f "/Users/sds/dev/share_ipa/server.js" 2>/dev/null || true
+pkill -f "node ${APP_DIR}/server.js" 2>/dev/null || true
+sleep 1
+pkill -9 -f "node ${APP_DIR}/server.js" 2>/dev/null || true
 
 sudo caddy stop 2>/dev/null || true
 sleep 1
 
-echo "==> Giải phóng cổng $PORT_NUM và 3080..."
-free_port "$PORT_NUM"
-free_port 3080
+echo "==> Kiểm tra cổng $PORT_NUM (Node) và 3080 (Caddy LAN) — không kill process lạ..."
+assert_port_free "$PORT_NUM"
+assert_port_free 3080
 
 echo "==> Chạy cloudflared tunnel..."
 nohup cloudflared tunnel run --token "$CLOUDFLARED_TOKEN" \
@@ -79,10 +81,9 @@ echo $! > "$PID_DIR/cloudflared.pid"
 echo "==> npm install..."
 npm install
 
-# Đảm bảo cổng vẫn trống sau npm (phòng process tự respawn)
-free_port "$PORT_NUM"
+assert_port_free "$PORT_NUM"
 
-echo "==> Chạy node server.js..."
+echo "==> Chạy node server.js (PORT=$PORT_NUM)..."
 nohup node server.js > "$PID_DIR/server.log" 2>&1 &
 echo $! > "$PID_DIR/server.pid"
 sleep 0.8
@@ -90,9 +91,6 @@ sleep 0.8
 if ! kill -0 "$(cat "$PID_DIR/server.pid")" 2>/dev/null; then
   echo "❌ node server.js đã thoát ngay sau khi start:"
   tail -n 40 "$PID_DIR/server.log" || true
-  echo ""
-  echo "   Ai đang giữ :$PORT_NUM?"
-  lsof -nP -iTCP:"$PORT_NUM" -sTCP:LISTEN || echo "   (lsof không thấy process)"
   exit 1
 fi
 
@@ -119,6 +117,7 @@ echo ""
 echo "✅ Share-IPA đã restart."
 echo "   cloudflared pid: $(cat "$PID_DIR/cloudflared.pid")"
 echo "   server      pid: $(cat "$PID_DIR/server.pid")"
+echo "   node port: $PORT_NUM (Jenkins :3000 không bị đụng)"
 echo "   logs: $PID_DIR/cloudflared.log , $PID_DIR/server.log"
 if [[ "$ready" -eq 1 ]]; then
   echo "   LAN API: OK"
@@ -126,6 +125,5 @@ if [[ "$ready" -eq 1 ]]; then
 else
   echo "   LAN API: CHƯA OK — xem logs/server.log"
   tail -n 40 "$PID_DIR/server.log" || true
-  lsof -nP -iTCP:"$PORT_NUM" -sTCP:LISTEN || true
   exit 1
 fi
