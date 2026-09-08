@@ -3,18 +3,8 @@ share-ipa.vunt.site {
 	reverse_proxy localhost:3000
 }
 
-# LAN — tải IPA/APK trong mạng nội bộ (không qua Cloudflare Tunnel).
+# LAN HTTP — tải nhanh trong mạng nội bộ (Android OK).
 # .env: LAN_BASE_URL=http://<IP-LAN>:3080
-# Ví dụ: LAN_BASE_URL=http://192.168.1.50:3080
-#
-# Android: HTTP (:3080) là đủ.
-# iOS OTA: cần HTTPS — dùng :3443 (tls internal), trust CA Caddy trên máy, rồi
-#          LAN_BASE_URL=https://<IP-LAN>:3443
-:3080 {
-	reverse_proxy localhost:3000
-}
-
-:3443 {
-	tls internal
+http://:3080 {
 	reverse_proxy localhost:3000
 }
