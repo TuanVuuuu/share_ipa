@@ -2250,6 +2250,15 @@ const server = http.createServer((req, res) => {
     return app(req, res);
 });
 
+server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+        console.error(`[FATAL] Cổng ${PORT} đang bị chiếm (EADDRINUSE). Chạy: lsof -nP -iTCP:${PORT} -sTCP:LISTEN`);
+    } else {
+        console.error('[FATAL] HTTP server error:', err);
+    }
+    process.exit(1);
+});
+
 server.listen(PORT, '0.0.0.0', () => {
     const lanBase = resolveConfiguredLanBaseUrl();
     const candidates = getLanCandidateBaseUrls();
