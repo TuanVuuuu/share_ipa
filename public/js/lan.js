@@ -181,24 +181,19 @@
         add(info.baseUrl);
         if (Array.isArray(info.candidates)) info.candidates.forEach(add);
 
-        // Thử ping (có thể bị chặn trên HTTPS → bỏ qua)
+        // Từ HTTPS public: KHÔNG ping HTTP LAN (bị trình duyệt chặn) — trả baseUrl ngay
         const pageIsHttps = global.location.protocol === 'https:';
-        if (!pageIsHttps) {
-            for (const url of candidates) {
-                if (await probeLan(url)) {
-                    return { url, verified: true, alreadyOnLan: false };
-                }
-            }
-        } else {
-            // HTTPS: thử nhanh pixel/fetch; thất bại là bình thường
-            const probeResults = await Promise.all(
-                candidates.slice(0, 4).map(async (url) => ((await probeLan(url)) ? url : null))
-            );
-            const probed = probeResults.find(Boolean);
-            if (probed) return { url: probed, verified: true, alreadyOnLan: false };
+        if (pageIsHttps) {
+            return { url: info.baseUrl, verified: false, alreadyOnLan: false };
         }
 
-        // WebRTC cùng subnet (trình duyệt mới có thể không lộ IP local)
+        // HTTP (đã ở mạng nội bộ / hoặc LAN page): thử ping
+        for (const url of candidates) {
+            if (await probeLan(url)) {
+                return { url, verified: true, alreadyOnLan: false };
+            }
+        }
+
         const localIps = await discoverLocalIpv4s();
         const serverIps = Array.isArray(info.addresses) ? info.addresses : [];
         for (const serverIp of serverIps) {
@@ -208,7 +203,6 @@
             return { url, verified: true, alreadyOnLan: false };
         }
 
-        // Không verify được từ HTTPS — vẫn gợi ý link LAN từ máy chủ
         return { url: info.baseUrl, verified: false, alreadyOnLan: false };
     }
 
