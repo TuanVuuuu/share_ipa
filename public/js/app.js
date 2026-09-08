@@ -573,6 +573,40 @@ logoutBtn.addEventListener('click', async () => {
 });
 
 checkAuthStatus();
+refreshLanBanner();
+
+async function refreshLanBanner() {
+    const banner = document.getElementById('lan-banner');
+    const text = document.getElementById('lan-banner-text');
+    const link = document.getElementById('lan-banner-link');
+    if (!banner || !text || !window.LanTransfer) return;
+
+    try {
+        const lanBase = await window.LanTransfer.getLanBase();
+        if (!lanBase) {
+            banner.style.display = 'none';
+            banner.hidden = true;
+            return;
+        }
+
+        const canUpload = await window.LanTransfer.canUploadLocally();
+        banner.hidden = false;
+        banner.style.display = '';
+        if (canUpload) {
+            banner.classList.add('is-active');
+            text.textContent = 'Đang dùng mạng nội bộ — upload và tải file không qua R2.';
+            link.style.display = 'none';
+        } else {
+            banner.classList.remove('is-active');
+            text.textContent = 'Máy bạn cùng mạng với máy chủ. Mở bản nội bộ để upload/tải nhanh, không qua R2.';
+            link.href = lanBase;
+            link.style.display = '';
+        }
+    } catch (_) {
+        banner.style.display = 'none';
+        banner.hidden = true;
+    }
+}
 
 function appendLog(time, message, type) {
     const div = document.createElement('div');
@@ -830,7 +864,12 @@ async function uploadSecure(file) {
     const startedAt = startProcessingUI();
     _resetUploadState();
 
-    // Thử R2 direct upload trước; nếu server chưa cấu hình R2 thì fallback chunk cũ
+    const useLan = !!(window.LanTransfer && await window.LanTransfer.canUploadLocally());
+    if (useLan) {
+        setActivity('Cùng mạng LAN — upload thẳng vào máy chủ, không qua R2...', 'active');
+        return uploadViaChunks(file, startedAt, { viaLan: true });
+    }
+
     let r2Info = null;
     try {
         const r2StartRes = await fetch('/api/r2-start', {
@@ -842,13 +881,16 @@ async function uploadSecure(file) {
         if (r2StartData && r2StartData.success && r2StartData.r2Available) {
             r2Info = { r2UploadId: r2StartData.r2UploadId, objectKey: r2StartData.objectKey };
         }
+        if (r2StartData && r2StartData.skipReason === 'lan') {
+            setActivity('Cùng mạng LAN — upload thẳng vào máy chủ, không qua R2...', 'active');
+            return uploadViaChunks(file, startedAt, { viaLan: true });
+        }
     } catch (_) { /* mạng lỗi → fallback */ }
 
     if (r2Info) {
         return uploadViaR2(file, startedAt, r2Info);
-    } else {
-        return uploadViaChunks(file, startedAt);
     }
+    return uploadViaChunks(file, startedAt);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -990,9 +1032,9 @@ async function uploadViaR2(file, startedAt, { r2UploadId, objectKey }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // LUỒNG FALLBACK: chunk qua server (dùng khi R2 chưa cấu hình)
 // ══════════════════════════════════════════════════════════════════════════════
-async function uploadViaChunks(file, startedAt) {
-    const CHUNK_SIZE  = 3 * 1024 * 1024;
-    const CONCURRENCY = 4;
+async function uploadViaChunks(file, startedAt, { viaLan = false } = {}) {
+    const CHUNK_SIZE  = viaLan ? 8 * 1024 * 1024 : 3 * 1024 * 1024;
+    const CONCURRENCY = viaLan ? 6 : 4;
     const MAX_RETRY   = 3;
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const uploadId = Date.now().toString() + Math.random().toString(36).slice(2, 8);
@@ -1048,7 +1090,9 @@ async function uploadViaChunks(file, startedAt) {
     try {
         armStallWatch();
         _recordSpeedSample();
-        setActivity(`Chunk upload — ${CONCURRENCY} luồng song song...`, 'active');
+        setActivity(viaLan
+            ? `LAN upload — ${CONCURRENCY} luồng vào máy chủ nội bộ...`
+            : `Chunk upload — ${CONCURRENCY} luồng song song...`, 'active');
 
         let nextIndex = 0;
         const worker = async () => {

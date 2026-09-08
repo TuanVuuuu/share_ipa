@@ -25,7 +25,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '28';
+const ASSET_VERSION = process.env.ASSET_VERSION || '29';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -114,15 +114,31 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const AUTH_COOKIE_NAME = 'share_ipa_auth';
 
+function lanIpPriority(ip) {
+    const host = String(ip || '').replace(/^::ffff:/, '');
+    if (/^192\.168\./.test(host)) return 0;
+    if (/^10\./.test(host)) return 1;
+    const m = host.match(/^172\.(\d+)\./);
+    if (m) {
+        const n = Number(m[1]);
+        if (n >= 16 && n <= 31) return 2;
+    }
+    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)) return 3;
+    return 9;
+}
+
 function getLanIpv4Addresses() {
     const nets = os.networkInterfaces();
     const out = [];
     for (const name of Object.keys(nets || {})) {
         for (const net of nets[name] || []) {
             const family = net.family === 4 || net.family === 'IPv4';
-            if (family && !net.internal && net.address) out.push(net.address);
+            if (!family || net.internal || !net.address) continue;
+            if (/^169\.254\./.test(net.address)) continue;
+            out.push(net.address);
         }
     }
+    out.sort((a, b) => lanIpPriority(a) - lanIpPriority(b) || a.localeCompare(b));
     return out;
 }
 
@@ -131,6 +147,22 @@ function resolveConfiguredLanBaseUrl() {
     const ips = getLanIpv4Addresses();
     if (!ips.length) return '';
     return `http://${ips[0]}:${PORT}`;
+}
+
+function getLanCandidateBaseUrls() {
+    const urls = [];
+    const seen = new Set();
+    const add = (u) => {
+        if (!u || seen.has(u)) return;
+        seen.add(u);
+        urls.push(u);
+    };
+    if (LAN_BASE_URL) add(LAN_BASE_URL);
+    for (const ip of getLanIpv4Addresses()) {
+        add(`http://${ip}:${PORT}`);
+        if (Number(PORT) !== 3080) add(`http://${ip}:3080`);
+    }
+    return urls;
 }
 
 function isPrivateHostname(hostname) {
@@ -143,6 +175,7 @@ function isPrivateHostname(hostname) {
         const n = Number(m[1]);
         return n >= 16 && n <= 31;
     }
+    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)) return true;
     return false;
 }
 
@@ -154,17 +187,37 @@ function requestBaseUrl(req) {
     return `${proto}://${host}`.replace(/\/$/, '');
 }
 
+function getExternalClientIp(req) {
+    const cf = (req.headers['cf-connecting-ip'] || '').toString().trim();
+    if (cf) return cf.replace(/^::ffff:/, '');
+    const xf = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim();
+    if (xf) return xf.replace(/^::ffff:/, '');
+    const raw = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+    if (raw && raw !== '127.0.0.1' && raw !== '::1') return raw;
+    return '';
+}
+
 function isLanRequest(req) {
     const xfHost = (req.headers['x-forwarded-host'] || '').toString().split(',')[0].trim();
-    const host = (xfHost || req.headers.host || '').split(':')[0];
+    const hostHeader = xfHost || req.headers.host || '';
+    const host = hostHeader.split(':')[0];
     if (isPrivateHostname(host)) return true;
+
     const lanBase = resolveConfiguredLanBaseUrl();
-    if (!lanBase) return false;
-    try {
-        return new URL(lanBase).host === (xfHost || req.headers.host || '');
-    } catch (_) {
-        return false;
+    if (lanBase) {
+        try {
+            if (new URL(lanBase).host === hostHeader) return true;
+        } catch (_) { /* ignore */ }
     }
+
+    // Request đi qua Cloudflare Tunnel/CDN: IP client là WAN, không phải LAN.
+    if ((req.headers['cf-connecting-ip'] || '').toString().trim()) return false;
+
+    const clientIp = getExternalClientIp(req);
+    if (clientIp && isPrivateHostname(clientIp) && clientIp !== '127.0.0.1' && clientIp !== '::1') {
+        return true;
+    }
+    return false;
 }
 
 const UPLOADS_MAIN_DIR = '/Users/sds/dev/share_ipa/uploads';
@@ -181,7 +234,7 @@ const storage = multer.diskStorage({
     filename: (req, file, cb) => { cb(null, `app_${Date.now()}_${file.originalname}`); }
 });
 const upload = multer({ storage: storage, limits: { fileSize: 500 * 1024 * 1024 } }); // Hạn mức 500MB
-const chunkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+const chunkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024 } });
 
 function parseCookies(cookieHeader = '') {
     return cookieHeader.split(';').reduce((acc, part) => {
@@ -350,26 +403,48 @@ app.use('/uploads', express.static(UPLOADS_MAIN_DIR, {
 app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
 
 // Probe LAN: client (đang mở site public) gọi chéo origin để biết có cùng mạng không
-app.get('/api/lan-ping', (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ ok: true, t: Date.now() });
-});
+const LAN_PIXEL_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64'
+);
 
-app.options('/api/lan-ping', (req, res) => {
+function setLanCors(res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Cache-Control', 'no-store');
+}
+
+app.get('/api/lan-ping', (req, res) => {
+    setLanCors(res);
+    res.json({ ok: true, t: Date.now() });
+});
+
+app.get('/api/lan-pixel', (req, res) => {
+    setLanCors(res);
+    res.setHeader('Content-Type', 'image/png');
+    res.send(LAN_PIXEL_PNG);
+});
+
+app.options('/api/lan-ping', (req, res) => {
+    setLanCors(res);
+    res.status(204).end();
+});
+
+app.options('/api/lan-pixel', (req, res) => {
+    setLanCors(res);
     res.status(204).end();
 });
 
 app.get('/api/lan-info', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const baseUrl = resolveConfiguredLanBaseUrl();
+    const candidates = getLanCandidateBaseUrls();
     res.json({
         success: true,
         enabled: !!baseUrl,
         baseUrl: baseUrl || null,
+        candidates,
         addresses: getLanIpv4Addresses(),
         publicBaseUrl: PUBLIC_BASE_URL,
         viaLanHost: isLanRequest(req),
@@ -1892,6 +1967,10 @@ app.post('/api/r2-start', async (req, res) => {
     if (!r2Client) {
         return res.json({ success: false, r2Available: false, message: 'R2 chưa được cấu hình trên máy chủ.' });
     }
+    if (isLanRequest(req)) {
+        logToUI('📡 Cùng mạng LAN — nhận file trực tiếp, không qua R2.', 'info');
+        return res.json({ success: true, r2Available: false, skipReason: 'lan' });
+    }
     try {
         const { originalName = 'app.ipa' } = req.body;
         const safeName = path.basename(originalName).replace(/[^\w.\-]/g, '_');
@@ -2074,9 +2153,13 @@ app.post('/api/r2-finalize', async (req, res) => {
 
 const server = app.listen(PORT, () => {
     const lanBase = resolveConfiguredLanBaseUrl();
+    const candidates = getLanCandidateBaseUrls();
     console.log(`Diawi Local-First System active on port ${PORT}`);
     if (lanBase) {
         console.log(`[LAN] Tải nhanh nội bộ: ${lanBase} (set LAN_BASE_URL trong .env nếu cần)`);
+        if (candidates.length > 1) {
+            console.log('[LAN] Ứng viên:', candidates.join(', '));
+        }
     } else {
         console.log('[LAN] Không phát hiện IP LAN — chỉ phục vụ qua PUBLIC_BASE_URL.');
     }

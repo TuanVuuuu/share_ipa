@@ -3,8 +3,9 @@ share-ipa.vunt.site {
 	reverse_proxy localhost:3000
 }
 
-# LAN HTTP — tải nhanh trong mạng nội bộ (Android OK).
+# LAN HTTP — tải/upload nhanh trong mạng nội bộ.
 # .env: LAN_BASE_URL=http://<IP-LAN>:3080
+# Ví dụ: LAN_BASE_URL=http://192.168.1.50:3080
 http://:3080 {
 	reverse_proxy localhost:3000
 }

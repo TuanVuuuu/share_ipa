@@ -1,9 +1,9 @@
 /**
- * Ưu tiên tải IPA/APK qua LAN khi thiết bị cùng mạng với máy chủ.
- * Probe /api/lan-info + /api/lan-ping; nếu tới được → rewrite downloadUrl sang host nội bộ.
+ * Ưu tiên tải/upload IPA/APK qua LAN khi thiết bị cùng mạng với máy chủ.
+ * Probe fetch + pixel (tránh mixed content) + WebRTC cùng subnet.
  */
 (function (global) {
-    const PROBE_TIMEOUT_MS = 900;
+    const PROBE_TIMEOUT_MS = 2500;
     let cachedPromise = null;
 
     function isPrivateHostname(hostname) {
@@ -16,6 +16,7 @@
             const n = Number(m[1]);
             return n >= 16 && n <= 31;
         }
+        if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)) return true;
         return false;
     }
 
@@ -29,7 +30,6 @@
         try {
             const u = new URL(lanBase);
             if ((platform || 'ios') === 'android') return true;
-            // iOS OTA cần HTTPS (trừ localhost khi dev)
             return u.protocol === 'https:'
                 || u.hostname === 'localhost'
                 || u.hostname === '127.0.0.1';
@@ -52,25 +52,100 @@
         return `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
     }
 
-    async function probeLanPing(baseUrl) {
-        if (!baseUrl) return false;
+    function sameIpv4Subnet(a, b) {
+        const pa = String(a || '').split('.').map(Number);
+        const pb = String(b || '').split('.').map(Number);
+        if (pa.length !== 4 || pb.length !== 4 || pa.some(Number.isNaN) || pb.some(Number.isNaN)) {
+            return false;
+        }
+        if (pa[0] === 192 && pa[1] === 168) {
+            return pb[0] === 192 && pb[1] === 168 && pa[2] === pb[2];
+        }
+        if (pa[0] === 10) return pb[0] === 10 && pa[1] === pb[1];
+        if (pa[0] === 172 && pa[1] >= 16 && pa[1] <= 31) {
+            return pb[0] === 172 && pa[1] === pb[1];
+        }
+        if (pa[0] === 100 && pa[1] >= 64 && pa[1] <= 127) {
+            return pb[0] === 100 && pa[1] === pb[1] && pa[2] === pb[2];
+        }
+        return false;
+    }
+
+    function probeLanPing(baseUrl) {
+        if (!baseUrl) return Promise.resolve(false);
         const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
         const timer = ctrl ? setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS) : null;
-        try {
-            const res = await fetch(`${baseUrl}/api/lan-ping`, {
-                method: 'GET',
-                mode: 'cors',
-                cache: 'no-store',
-                signal: ctrl ? ctrl.signal : undefined,
-            });
+        return fetch(`${baseUrl}/api/lan-ping`, {
+            method: 'GET',
+            mode: 'cors',
+            cache: 'no-store',
+            signal: ctrl ? ctrl.signal : undefined,
+        }).then((res) => {
             if (!res.ok) return false;
-            const data = await res.json().catch(() => null);
-            return !!(data && data.ok);
-        } catch (_) {
-            return false;
-        } finally {
+            return res.json().catch(() => null).then((data) => !!(data && data.ok));
+        }).catch(() => false).finally(() => {
             if (timer) clearTimeout(timer);
-        }
+        });
+    }
+
+    function probeLanPixel(baseUrl) {
+        if (!baseUrl) return Promise.resolve(false);
+        return new Promise((resolve) => {
+            const img = new Image();
+            const timer = setTimeout(() => {
+                img.onload = img.onerror = null;
+                img.src = '';
+                resolve(false);
+            }, PROBE_TIMEOUT_MS);
+            const done = (ok) => {
+                clearTimeout(timer);
+                img.onload = img.onerror = null;
+                resolve(ok);
+            };
+            img.onload = () => done(true);
+            img.onerror = () => done(false);
+            img.referrerPolicy = 'no-referrer';
+            img.src = `${baseUrl}/api/lan-pixel?t=${Date.now()}`;
+        });
+    }
+
+    async function probeLan(baseUrl) {
+        if (await probeLanPing(baseUrl)) return true;
+        return probeLanPixel(baseUrl);
+    }
+
+    function discoverLocalIpv4s() {
+        return new Promise((resolve) => {
+            const RTC = global.RTCPeerConnection || global.webkitRTCPeerConnection;
+            if (!RTC) {
+                resolve([]);
+                return;
+            }
+            const ips = new Set();
+            let pc;
+            const finish = () => {
+                try { if (pc) pc.close(); } catch (_) { /* ignore */ }
+                resolve([...ips]);
+            };
+            const timer = setTimeout(finish, 800);
+            try {
+                pc = new RTC({ iceServers: [] });
+                pc.createDataChannel('lan');
+                pc.onicecandidate = (e) => {
+                    const cand = e && e.candidate && e.candidate.candidate;
+                    if (!cand) return;
+                    const m = cand.match(/([0-9]{1,3}(?:\.[0-9]{1,3}){3})/);
+                    if (m && isPrivateHostname(m[1])) ips.add(m[1]);
+                };
+                pc.createOffer().then((offer) => pc.setLocalDescription(offer)).catch(() => {
+                    clearTimeout(timer);
+                    finish();
+                });
+            } catch (_) {
+                clearTimeout(timer);
+                finish();
+            }
+        });
     }
 
     async function resolveLanBase() {
@@ -86,20 +161,54 @@
             return null;
         }
 
-        if (!info || !info.success || !info.baseUrl) return null;
+        if (!info || !info.success) return null;
 
+        if (info.viaLanHost) {
+            return global.location.origin;
+        }
+
+        const candidates = Array.isArray(info.candidates) && info.candidates.length
+            ? info.candidates
+            : (info.baseUrl ? [info.baseUrl] : []);
+
+        const probes = await Promise.all(candidates.map(async (url) => {
+            try {
+                if (new URL(url).origin === global.location.origin) return url;
+            } catch (_) { /* ignore */ }
+            return (await probeLan(url)) ? url : null;
+        }));
+        const probed = probes.find(Boolean);
+        if (probed) return probed;
+
+        const localIps = await discoverLocalIpv4s();
+        const serverIps = Array.isArray(info.addresses) ? info.addresses : [];
+        let fallbackPort = '3000';
         try {
-            if (new URL(info.baseUrl).origin === global.location.origin) {
-                return info.baseUrl;
-            }
+            if (info.baseUrl) fallbackPort = new URL(info.baseUrl).port || '3000';
         } catch (_) { /* ignore */ }
+        for (const serverIp of serverIps) {
+            if (!localIps.some((lip) => sameIpv4Subnet(lip, serverIp))) continue;
+            const match = candidates.find((c) => c.indexOf(serverIp) !== -1);
+            return match || `http://${serverIp}:${fallbackPort}`;
+        }
 
-        return (await probeLanPing(info.baseUrl)) ? info.baseUrl : null;
+        return null;
     }
 
     function getLanBase() {
         if (!cachedPromise) cachedPromise = resolveLanBase();
         return cachedPromise;
+    }
+
+    async function canUploadLocally() {
+        if (isPrivateHostname(global.location.hostname)) return true;
+        const lanBase = await getLanBase();
+        if (!lanBase) return false;
+        try {
+            return new URL(lanBase).origin === global.location.origin;
+        } catch (_) {
+            return false;
+        }
     }
 
     async function preferDownloadUrl(item) {
@@ -109,7 +218,6 @@
         const lanBase = await getLanBase();
         if (!lanBase) return fallback;
 
-        // Chỉ dùng LAN khi server xác nhận còn file local (tránh 404 với bản chỉ trên R2 cũ)
         const sameOrigin = lanBase === global.location.origin;
         if (!sameOrigin && item.localFileAvailable !== true) return fallback;
 
@@ -129,6 +237,8 @@
         applyDownloadHref,
         buildLanDownloadUrl,
         rewriteLegacyHost,
+        canUploadLocally,
+        isPrivateHostname,
         isActive: async () => !!(await getLanBase()),
     };
 })(typeof window !== 'undefined' ? window : globalThis);
