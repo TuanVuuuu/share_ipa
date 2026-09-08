@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Restart Share-IPA: cloudflared tunnel + node server + Caddy
-# Chỉ dừng process của Share-IPA — KHÔNG kill process lạ trên cổng (tránh đụng Jenkins).
+# Restart Share-IPA: node server + Caddy (+ cloudflared chỉ khi chưa có tunnel)
+# An toàn: không pkill cloudflared/Jenkins/process lạ theo cổng.
 set -euo pipefail
 
 APP_DIR="/Users/sds/dev/share_ipa"
@@ -41,7 +41,6 @@ kill_pidfile() {
   fi
 }
 
-# Chỉ báo cáo nếu cổng bận — không kill process người khác
 assert_port_free() {
   local port="$1"
   local pids
@@ -49,19 +48,21 @@ assert_port_free() {
   if [[ -n "${pids}" ]]; then
     echo "❌ Cổng $port đang bị chiếm bởi PID: $pids"
     lsof -nP -iTCP:"$port" -sTCP:LISTEN || true
-    echo "   Không tự kill (an toàn cho Jenkins/dịch vụ khác)."
+    echo "   Không tự kill (an toàn cho Jenkins / tunnel chạy tay)."
     echo "   Nếu chắc là Share-IPA cũ: kill đúng PID ở trên, rồi chạy lại ./restart.sh"
     return 1
   fi
   return 0
 }
 
-echo "==> Dừng process Share-IPA cũ (theo pidfile + đúng path)..."
-kill_pidfile "$PID_DIR/cloudflared.pid"
-kill_pidfile "$PID_DIR/server.pid"
+cloudflared_already_running() {
+  pgrep -f "cloudflared tunnel run" >/dev/null 2>&1
+}
 
-# Chỉ dừng đúng Share-IPA — không pkill mọi "node server.js" trên máy
-pkill -f "cloudflared tunnel run --token" 2>/dev/null || true
+echo "==> Dừng Share-IPA node cũ (theo pidfile + đúng path)..."
+# KHÔNG kill cloudflared ở đây nếu bạn đang chạy tunnel thủ công.
+# Chỉ dừng node server do script này quản lý.
+kill_pidfile "$PID_DIR/server.pid"
 pkill -f "node ${APP_DIR}/server.js" 2>/dev/null || true
 sleep 1
 pkill -9 -f "node ${APP_DIR}/server.js" 2>/dev/null || true
@@ -69,14 +70,22 @@ pkill -9 -f "node ${APP_DIR}/server.js" 2>/dev/null || true
 sudo caddy stop 2>/dev/null || true
 sleep 1
 
-echo "==> Kiểm tra cổng $PORT_NUM (Node) và 3080 (Caddy LAN) — không kill process lạ..."
+echo "==> Kiểm tra cổng $PORT_NUM (Node) và 3080 (Caddy LAN)..."
 assert_port_free "$PORT_NUM"
 assert_port_free 3080
 
-echo "==> Chạy cloudflared tunnel..."
-nohup cloudflared tunnel run --token "$CLOUDFLARED_TOKEN" \
-  > "$PID_DIR/cloudflared.log" 2>&1 &
-echo $! > "$PID_DIR/cloudflared.pid"
+if cloudflared_already_running; then
+  echo "==> cloudflared tunnel đang chạy — giữ nguyên, không restart tunnel."
+  rm -f "$PID_DIR/cloudflared.pid"
+else
+  echo "==> Chưa có cloudflared — start tunnel mới..."
+  # Chỉ kill pidfile cũ nếu process đó vẫn sống (do lần restart.sh trước start)
+  kill_pidfile "$PID_DIR/cloudflared.pid"
+  nohup cloudflared tunnel run --token "$CLOUDFLARED_TOKEN" \
+    > "$PID_DIR/cloudflared.log" 2>&1 &
+  echo $! > "$PID_DIR/cloudflared.pid"
+  echo "   cloudflared pid: $(cat "$PID_DIR/cloudflared.pid")"
+fi
 
 echo "==> npm install..."
 npm install
@@ -115,10 +124,14 @@ sudo caddy start --config ./Caddyfile
 
 echo ""
 echo "✅ Share-IPA đã restart."
-echo "   cloudflared pid: $(cat "$PID_DIR/cloudflared.pid")"
-echo "   server      pid: $(cat "$PID_DIR/server.pid")"
-echo "   node port: $PORT_NUM (Jenkins :3000 không bị đụng)"
-echo "   logs: $PID_DIR/cloudflared.log , $PID_DIR/server.log"
+echo "   server pid: $(cat "$PID_DIR/server.pid")"
+echo "   node port: $PORT_NUM"
+if [[ -f "$PID_DIR/cloudflared.pid" ]]; then
+  echo "   cloudflared pid: $(cat "$PID_DIR/cloudflared.pid") (do script start)"
+else
+  echo "   cloudflared: dùng tunnel đang chạy sẵn (không đụng)"
+fi
+echo "   logs: $PID_DIR/server.log"
 if [[ "$ready" -eq 1 ]]; then
   echo "   LAN API: OK"
   curl -s --noproxy '*' "http://127.0.0.1:${PORT_NUM}/api/lan-info"; echo
