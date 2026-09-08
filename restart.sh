@@ -51,6 +51,16 @@ echo "==> Chạy node server.js..."
 nohup node server.js > "$PID_DIR/server.log" 2>&1 &
 echo $! > "$PID_DIR/server.pid"
 
+echo "==> Chờ API sẵn sàng..."
+ready=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -sf --noproxy '*' "http://127.0.0.1:3000/api/lan-info" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 0.5
+done
+
 echo "==> Caddy validate + start..."
 sudo caddy validate --config ./Caddyfile
 sudo caddy start --config ./Caddyfile
@@ -60,4 +70,10 @@ echo "✅ Share-IPA đã restart."
 echo "   cloudflared pid: $(cat "$PID_DIR/cloudflared.pid")"
 echo "   server      pid: $(cat "$PID_DIR/server.pid")"
 echo "   logs: $PID_DIR/cloudflared.log , $PID_DIR/server.log"
-echo "   Kiểm tra: curl -s http://127.0.0.1:3000/api/lan-info | head -c 200; echo"
+if [[ "$ready" -eq 1 ]]; then
+  echo "   LAN API: OK"
+  curl -s --noproxy '*' "http://127.0.0.1:3000/api/lan-info"; echo
+else
+  echo "   LAN API: CHƯA OK — xem logs/server.log"
+  tail -n 30 "$PID_DIR/server.log" || true
+fi

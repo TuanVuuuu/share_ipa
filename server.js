@@ -25,7 +25,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '29';
+const ASSET_VERSION = process.env.ASSET_VERSION || '30';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -278,6 +278,56 @@ function requirePermission(permission) {
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: false, limit: '5mb' }));
 
+const LAN_PIXEL_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64'
+);
+
+function setLanCors(res) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Cache-Control', 'no-store');
+}
+
+function sendLanInfo(req, res) {
+    res.setHeader('Cache-Control', 'no-store');
+    const baseUrl = resolveConfiguredLanBaseUrl();
+    const candidates = getLanCandidateBaseUrls();
+    res.json({
+        success: true,
+        enabled: !!baseUrl,
+        baseUrl: baseUrl || null,
+        candidates,
+        addresses: getLanIpv4Addresses(),
+        publicBaseUrl: PUBLIC_BASE_URL,
+        viaLanHost: isLanRequest(req),
+    });
+}
+
+// LAN probe — gắn sớm (trước static) để không bị middleware khác nuốt request
+app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'OPTIONS') return next();
+    const p = req.path || '';
+    if (p !== '/api/lan-info' && p !== '/api/lan' && p !== '/api/lan-ping' && p !== '/api/lan-pixel') {
+        return next();
+    }
+    if (req.method === 'OPTIONS') {
+        setLanCors(res);
+        return res.status(204).end();
+    }
+    if (p === '/api/lan-ping') {
+        setLanCors(res);
+        return res.json({ ok: true, t: Date.now() });
+    }
+    if (p === '/api/lan-pixel') {
+        setLanCors(res);
+        res.setHeader('Content-Type', 'image/png');
+        return res.send(LAN_PIXEL_PNG);
+    }
+    return sendLanInfo(req, res);
+});
+
 // Trả JSON khi body quá lớn / JSON lỗi (tránh client nhận HTML rồi fail parse)
 app.use((err, req, res, next) => {
     if (!err) return next();
@@ -402,54 +452,26 @@ app.use('/uploads', express.static(UPLOADS_MAIN_DIR, {
 }));
 app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
 
-// Probe LAN: client (đang mở site public) gọi chéo origin để biết có cùng mạng không
-const LAN_PIXEL_PNG = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-    'base64'
-);
-
-function setLanCors(res) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    res.setHeader('Cache-Control', 'no-store');
-}
-
+// Đăng ký lại route LAN dạng app.get (phòng trường hợp middleware sớm bị bỏ qua)
 app.get('/api/lan-ping', (req, res) => {
     setLanCors(res);
     res.json({ ok: true, t: Date.now() });
 });
-
 app.get('/api/lan-pixel', (req, res) => {
     setLanCors(res);
     res.setHeader('Content-Type', 'image/png');
     res.send(LAN_PIXEL_PNG);
 });
-
 app.options('/api/lan-ping', (req, res) => {
     setLanCors(res);
     res.status(204).end();
 });
-
 app.options('/api/lan-pixel', (req, res) => {
     setLanCors(res);
     res.status(204).end();
 });
-
-app.get('/api/lan-info', (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    const baseUrl = resolveConfiguredLanBaseUrl();
-    const candidates = getLanCandidateBaseUrls();
-    res.json({
-        success: true,
-        enabled: !!baseUrl,
-        baseUrl: baseUrl || null,
-        candidates,
-        addresses: getLanIpv4Addresses(),
-        publicBaseUrl: PUBLIC_BASE_URL,
-        viaLanHost: isLanRequest(req),
-    });
-});
+app.get('/api/lan-info', sendLanInfo);
+app.get('/api/lan', sendLanInfo);
 
 // Đường dẫn /login cũ giờ trỏ thẳng về trang chính (ô đăng nhập nằm ngay trong trang)
 app.get('/login', (req, res) => res.redirect('/'));
@@ -2151,7 +2173,23 @@ app.post('/api/r2-finalize', async (req, res) => {
     }
 })();
 
-const server = app.listen(PORT, () => {
+function listRegisteredApiRoutes() {
+    try {
+        const stack = (app.router && app.router.stack) || [];
+        return stack
+            .filter((layer) => layer.route && String(layer.route.path || '').startsWith('/api/'))
+            .map((layer) => {
+                const methods = Object.keys(layer.route.methods || {})
+                    .filter((m) => layer.route.methods[m])
+                    .map((m) => m.toUpperCase());
+                return `${methods.join(',') || 'ALL'} ${layer.route.path}`;
+            });
+    } catch (_) {
+        return [];
+    }
+}
+
+const server = app.listen(PORT, '0.0.0.0', () => {
     const lanBase = resolveConfiguredLanBaseUrl();
     const candidates = getLanCandidateBaseUrls();
     console.log(`Diawi Local-First System active on port ${PORT}`);
@@ -2163,6 +2201,39 @@ const server = app.listen(PORT, () => {
     } else {
         console.log('[LAN] Không phát hiện IP LAN — chỉ phục vụ qua PUBLIC_BASE_URL.');
     }
+
+    const apiRoutes = listRegisteredApiRoutes();
+    const lanRoutes = apiRoutes.filter((r) => r.includes('/api/lan'));
+    console.log(`[LAN] Routes đã gắn: ${lanRoutes.length ? lanRoutes.join(' | ') : '(KHÔNG CÓ — lỗi đăng ký)'}`);
+
+    // Self-check: xác nhận process này thật sự trả lời /api/lan-info
+    httpGetJson(`http://127.0.0.1:${PORT}/api/lan-info`)
+        .then((body) => {
+            console.log('[LAN] Self-check OK:', body && body.baseUrl ? body.baseUrl : body);
+        })
+        .catch((err) => {
+            console.error('[LAN] Self-check FAIL:', err.message);
+        });
 });
 server.timeout = 600000;
 server.keepAliveTimeout = 600000;
+
+function httpGetJson(url) {
+    return new Promise((resolve, reject) => {
+        const lib = require('http');
+        const req = lib.get(url, { timeout: 3000 }, (res) => {
+            let raw = '';
+            res.on('data', (c) => { raw += c; });
+            res.on('end', () => {
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    try { resolve(JSON.parse(raw)); }
+                    catch (e) { reject(new Error(`JSON parse fail: ${raw.slice(0, 120)}`)); }
+                } else {
+                    reject(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 120)}`));
+                }
+            });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+}
