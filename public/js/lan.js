@@ -148,9 +148,14 @@
         });
     }
 
-    async function resolveLanBase() {
+    /**
+     * Phát hiện URL LAN để gợi ý chuyển trang.
+     * Từ HTTPS public, trình duyệt thường chặn ping HTTP nội bộ (mixed content /
+     * Private Network Access) → vẫn trả baseUrl từ server để hiện nút chuyển.
+     */
+    async function detectLanSuggestion() {
         if (isPrivateHostname(global.location.hostname)) {
-            return global.location.origin;
+            return { url: global.location.origin, verified: true, alreadyOnLan: true };
         }
 
         let info = null;
@@ -160,11 +165,10 @@
         } catch (_) {
             return null;
         }
-
-        if (!info || !info.success) return null;
+        if (!info || !info.success || !info.baseUrl) return null;
 
         if (info.viaLanHost) {
-            return global.location.origin;
+            return { url: global.location.origin, verified: true, alreadyOnLan: true };
         }
 
         const candidates = [];
@@ -174,31 +178,45 @@
             seen.add(u);
             candidates.push(u);
         };
-        // Ưu tiên LAN_BASE_URL từ server (vd http://192.168.1.105:3080)
-        if (info.baseUrl) add(info.baseUrl);
+        add(info.baseUrl);
         if (Array.isArray(info.candidates)) info.candidates.forEach(add);
 
-        const probes = await Promise.all(candidates.map(async (url) => {
-            try {
-                if (new URL(url).origin === global.location.origin) return url;
-            } catch (_) { /* ignore */ }
-            return (await probeLan(url)) ? url : null;
-        }));
-        const probed = probes.find(Boolean);
-        if (probed) return probed;
+        // Thử ping (có thể bị chặn trên HTTPS → bỏ qua)
+        const pageIsHttps = global.location.protocol === 'https:';
+        if (!pageIsHttps) {
+            for (const url of candidates) {
+                if (await probeLan(url)) {
+                    return { url, verified: true, alreadyOnLan: false };
+                }
+            }
+        } else {
+            // HTTPS: thử nhanh pixel/fetch; thất bại là bình thường
+            const probeResults = await Promise.all(
+                candidates.slice(0, 4).map(async (url) => ((await probeLan(url)) ? url : null))
+            );
+            const probed = probeResults.find(Boolean);
+            if (probed) return { url: probed, verified: true, alreadyOnLan: false };
+        }
 
+        // WebRTC cùng subnet (trình duyệt mới có thể không lộ IP local)
         const localIps = await discoverLocalIpv4s();
         const serverIps = Array.isArray(info.addresses) ? info.addresses : [];
-        let fallbackPort = '3081';
-        try {
-            if (info.baseUrl) fallbackPort = new URL(info.baseUrl).port || '3081';
-        } catch (_) { /* ignore */ }
         for (const serverIp of serverIps) {
             if (!localIps.some((lip) => sameIpv4Subnet(lip, serverIp))) continue;
             const match = candidates.find((c) => c.indexOf(serverIp) !== -1);
-            return match || `http://${serverIp}:${fallbackPort}`;
+            const url = match || info.baseUrl;
+            return { url, verified: true, alreadyOnLan: false };
         }
 
+        // Không verify được từ HTTPS — vẫn gợi ý link LAN từ máy chủ
+        return { url: info.baseUrl, verified: false, alreadyOnLan: false };
+    }
+
+    async function resolveLanBase() {
+        const suggestion = await detectLanSuggestion();
+        if (!suggestion) return null;
+        // Chỉ dùng URL đã chắc chắn với LAN cho upload/download rewrite
+        if (suggestion.alreadyOnLan || suggestion.verified) return suggestion.url;
         return null;
     }
 
@@ -240,6 +258,7 @@
     }
 
     global.LanTransfer = {
+        detectLanSuggestion,
         getLanBase,
         preferDownloadUrl,
         applyDownloadHref,

@@ -600,24 +600,27 @@ async function refreshLanBanner() {
         banner.classList.remove('is-active');
         link.style.display = 'none';
 
-        // Sau login: ping lại LAN (vd http://192.168.1.105:3080)
-        const lanBase = await window.LanTransfer.getLanBase({ force: true });
-        if (!lanBase) {
+        const suggestion = await window.LanTransfer.detectLanSuggestion();
+        if (!suggestion || !suggestion.url) {
             hideLanBanner();
             return;
         }
 
-        const alreadyOnLan = await window.LanTransfer.canUploadLocally();
-        if (alreadyOnLan) {
+        if (suggestion.alreadyOnLan) {
             banner.classList.add('is-active');
-            text.textContent = `Đang dùng mạng LAN (${lanBase}) — upload/tải nhanh, không qua R2.`;
+            text.textContent = `Đang dùng mạng LAN (${suggestion.url}) — upload/tải nhanh, không qua R2.`;
             link.style.display = 'none';
             return;
         }
 
         banner.classList.remove('is-active');
-        text.textContent = `Máy bạn cùng mạng với máy chủ. Ping OK tới ${lanBase} — chuyển sang để upload/tải nhanh hơn nhiều.`;
-        link.href = lanBase;
+        if (suggestion.verified) {
+            text.textContent = `Phát hiện cùng mạng với máy chủ. Mở ${suggestion.url} để upload/tải nhanh hơn nhiều.`;
+        } else {
+            // HTTPS public không ping được HTTP LAN (trình duyệt chặn) — vẫn hiện nút
+            text.textContent = `Nếu bạn cùng mạng LAN/Wi‑Fi với máy chủ, chuyển sang ${suggestion.url} để upload/tải nhanh (không qua Tunnel).`;
+        }
+        link.href = suggestion.url;
         link.textContent = 'Chuyển sang web LAN';
         link.style.display = '';
         link.target = '_self';
