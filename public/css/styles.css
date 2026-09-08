@@ -1561,7 +1561,7 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 }
 
 .lan-banner {
-    display: flex;
+    display: none;
     justify-content: space-between;
     align-items: center;
     gap: 12px;
@@ -1573,7 +1573,20 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     margin-bottom: 20px;
     font-size: 14px;
     color: #6b4e00;
-    font-weight: 500;
+}
+.lan-banner:not([hidden]) {
+    display: flex;
+}
+.lan-banner-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.lan-banner-copy strong {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
 }
 .lan-banner .btn {
     flex-shrink: 0;

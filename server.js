@@ -26,7 +26,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '37';
+const ASSET_VERSION = process.env.ASSET_VERSION || '38';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -447,6 +447,13 @@ function buildOgMeta({ title, description, image, url } = {}) {
     ].join('\n    ');
 }
 
+function renderPublicHtml(html) {
+    const lanBase = resolveConfiguredLanBaseUrl() || '';
+    return html
+        .replace(/__V__/g, ASSET_VERSION)
+        .replace(/__LAN_BASE__/g, lanBase.replace(/"/g, '&quot;'));
+}
+
 // Trả về file HTML kèm chèn version cho asset (thay __V__ bằng ASSET_VERSION) để phá cache
 function sendHtmlWithVersion(res, fileName) {
     const filePath = path.join(__dirname, 'public', fileName);
@@ -455,7 +462,7 @@ function sendHtmlWithVersion(res, fileName) {
             res.status(404).send('Not found');
             return;
         }
-        const rendered = html.replace(/__V__/g, ASSET_VERSION);
+        const rendered = renderPublicHtml(html);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.send(rendered);
@@ -470,7 +477,7 @@ function sendHtmlWithOg(res, fileName, ogMeta) {
             res.status(404).send('Not found');
             return;
         }
-        let rendered = html.replace(/__V__/g, ASSET_VERSION);
+        let rendered = renderPublicHtml(html);
         if (ogMeta) {
             rendered = rendered.replace('<!-- __OG_META__ -->', ogMeta);
         } else {

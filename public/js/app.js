@@ -579,74 +579,77 @@ checkAuthStatus();
 function hideLanBanner() {
     const banner = document.getElementById('lan-banner');
     if (!banner) return;
-    banner.style.display = 'none';
     banner.hidden = true;
+    banner.style.display = 'none';
 }
 
-async function refreshLanBanner() {
+function showLanBanner(lanUrl, { alreadyOnLan = false } = {}) {
     const banner = document.getElementById('lan-banner');
     const text = document.getElementById('lan-banner-text');
+    const title = document.getElementById('lan-banner-title');
     const link = document.getElementById('lan-banner-link');
     if (!banner || !text || !link) return;
-    if (!isAuthenticated) {
-        hideLanBanner();
-        return;
-    }
 
-    // Đang ở IP LAN rồi
-    const onPrivate = window.LanTransfer
-        && window.LanTransfer.isPrivateHostname
-        && window.LanTransfer.isPrivateHostname(window.location.hostname);
-    if (onPrivate) {
-        banner.hidden = false;
-        banner.style.display = '';
+    banner.hidden = false;
+    banner.style.display = 'flex';
+
+    if (alreadyOnLan) {
         banner.classList.add('is-active');
-        text.textContent = `Đang dùng mạng LAN (${window.location.origin}) — upload/tải nhanh, không qua R2.`;
+        if (title) title.textContent = 'Đang dùng mạng LAN';
+        text.textContent = `${lanUrl} — upload/tải nhanh, không qua Tunnel/R2.`;
         link.style.display = 'none';
         return;
     }
 
-    banner.hidden = false;
-    banner.style.display = '';
     banner.classList.remove('is-active');
-    link.style.display = 'none';
-    text.textContent = 'Đang lấy địa chỉ mạng LAN từ máy chủ...';
-
-    let lanUrl = null;
-    try {
-        // 1) Nhanh: chỉ hỏi server (không ping HTTP — trình duyệt HTTPS sẽ chặn)
-        const res = await fetch('/api/lan-info', { cache: 'no-store' });
-        const info = await res.json().catch(() => null);
-        if (info && info.success && info.baseUrl) {
-            lanUrl = info.baseUrl;
-        }
-    } catch (err) {
-        console.warn('[LAN] lan-info failed', err);
-    }
-
-    // 2) Fallback qua LanTransfer nếu có
-    if (!lanUrl && window.LanTransfer && window.LanTransfer.detectLanSuggestion) {
-        try {
-            const suggestion = await window.LanTransfer.detectLanSuggestion();
-            if (suggestion && suggestion.url) lanUrl = suggestion.url;
-        } catch (err) {
-            console.warn('[LAN] detectLanSuggestion failed', err);
-        }
-    }
-
-    if (!lanUrl) {
-        hideLanBanner();
-        console.warn('[LAN] Không có baseUrl — kiểm tra LAN_BASE_URL trên máy chủ');
-        return;
-    }
-
-    banner.classList.remove('is-active');
-    text.textContent = `Cùng mạng với máy chủ? Mở bản LAN để upload/tải nhanh hơn nhiều: ${lanUrl}`;
+    if (title) title.textContent = 'Có bản mạng LAN nhanh hơn';
+    text.textContent = `Cùng Wi‑Fi/LAN với máy chủ? Mở ${lanUrl} để upload nhanh hơn nhiều.`;
     link.href = lanUrl;
     link.textContent = 'Chuyển sang web LAN';
     link.style.display = 'inline-flex';
     link.target = '_self';
     link.rel = 'noopener';
+}
+
+async function refreshLanBanner() {
+    if (!isAuthenticated) {
+        hideLanBanner();
+        return;
+    }
+
+    const onPrivate = !!(window.LanTransfer
+        && window.LanTransfer.isPrivateHostname
+        && window.LanTransfer.isPrivateHostname(window.location.hostname));
+    if (onPrivate) {
+        showLanBanner(window.location.origin, { alreadyOnLan: true });
+        return;
+    }
+
+    // 1) URL nhúng sẵn từ HTML (LAN_BASE_URL lúc server render) — không cần API
+    let lanUrl = '';
+    const embedded = String(window.__LAN_BASE_URL__ || '').trim();
+    if (embedded && embedded.indexOf('__LAN_BASE__') === -1) {
+        lanUrl = embedded;
+    }
+
+    // 2) Fallback API
+    if (!lanUrl) {
+        try {
+            const res = await fetch('/api/lan-info', { cache: 'no-store' });
+            const info = await res.json().catch(() => null);
+            if (info && info.success && info.baseUrl) lanUrl = info.baseUrl;
+        } catch (err) {
+            console.warn('[LAN] lan-info failed', err);
+        }
+    }
+
+    if (!lanUrl) {
+        hideLanBanner();
+        console.warn('[LAN] Chưa có LAN_BASE_URL — kiểm tra .env máy chủ');
+        return;
+    }
+
+    showLanBanner(lanUrl, { alreadyOnLan: false });
     console.info('[LAN] Hiện nút chuyển sang', lanUrl);
 }
 
