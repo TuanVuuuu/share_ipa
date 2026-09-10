@@ -460,8 +460,14 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     box-shadow: none;
     pointer-events: none;
 }
-.install-zone.is-loading .qr-hint,
-.install-zone.is-loading .install-back { visibility: hidden; }
+.install-zone.is-denied .install-content,
+.install-zone.is-denied .install-skeleton,
+.install-zone.is-denied .install-btn,
+.install-zone.is-denied .qr-hint,
+.install-zone.is-denied .install-back,
+.install-zone.is-denied .install-brand {
+    display: none !important;
+}
 
 .sk {
     background: linear-gradient(100deg, #ececf0 30%, #f6f6f8 50%, #ececf0 70%);

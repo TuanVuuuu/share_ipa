@@ -85,9 +85,11 @@
             }
 
             const started = Date.now();
+            let sawPending = false;
             timer = setInterval(() => {
                 const state = popupState(win);
-                if (state === 'ready') {
+                if (state === 'pending') sawPending = true;
+                if (state === 'ready' && sawPending) {
                     stop();
                     closePopup(win);
                     hint.textContent = 'Xác thực thành công. Đang mở ứng dụng…';

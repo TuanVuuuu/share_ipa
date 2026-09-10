@@ -31,6 +31,20 @@ function stopLoading() {
     installZone.classList.remove('is-loading');
 }
 
+function showVpnGateUi() {
+    stopLoading();
+    if (installZone) installZone.classList.add('is-denied');
+    const content = document.getElementById('install-content');
+    if (content) content.style.display = 'none';
+    if (installBtn) installBtn.style.display = 'none';
+    if (installHint) installHint.style.display = 'none';
+    if (installBack) installBack.style.display = 'none';
+    const brand = document.querySelector('.install-brand');
+    if (brand) brand.style.display = 'none';
+    const gate = document.getElementById('vpn-gate-root');
+    if (gate && window.VpnGate) window.VpnGate.mount(gate);
+}
+
 function isAndroidUa() {
     return /Android/i.test(navigator.userAgent || '');
 }
@@ -61,24 +75,18 @@ async function init() {
     let lanHintShown = false;
     let vpnBlocked = false;
 
+    if (window.__VPN_LOCKED__) {
+        vpnBlocked = true;
+        showVpnGateUi();
+    }
+
     try {
         const res = await fetch(`/api/app-info?${looksLikePlist ? 'plist' : 'id'}=${encodeURIComponent(buildId)}`);
         const data = await res.json();
 
-        if (data.vpnRequired) {
+        if (data.vpnRequired || window.__VPN_LOCKED__) {
             vpnBlocked = true;
-            stopLoading();
-            const content = document.getElementById('install-content');
-            if (content) content.style.display = 'none';
-            if (installBtn) installBtn.style.display = 'none';
-            if (installHint) installHint.style.display = 'none';
-            if (installBack) installBack.style.display = 'none';
-            const brand = document.querySelector('.install-brand');
-            if (brand) brand.style.display = 'none';
-            const gate = document.getElementById('vpn-gate-root');
-            if (gate && window.VpnGate) {
-                window.VpnGate.mount(gate);
-            }
+            showVpnGateUi();
             return;
         }
 

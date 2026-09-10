@@ -37,7 +37,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '56';
+const ASSET_VERSION = process.env.ASSET_VERSION || '62';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -655,7 +655,7 @@ function sendHtmlWithVersion(res, fileName) {
 }
 
 // Trả về HTML với version + OG meta tags được inject động
-function sendHtmlWithOg(res, fileName, ogMeta) {
+function sendHtmlWithOg(res, fileName, ogMeta, extras) {
     const filePath = path.join(__dirname, 'public', fileName);
     fs.readFile(filePath, 'utf8', (err, html) => {
         if (err) {
@@ -668,6 +668,7 @@ function sendHtmlWithOg(res, fileName, ogMeta) {
         } else {
             rendered = rendered.replace('<!-- __OG_META__ -->', '');
         }
+        rendered = rendered.replace(/__VPN_LOCKED__/g, extras && extras.vpnLocked ? 'true' : 'false');
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.send(rendered);
@@ -790,6 +791,7 @@ app.get('/login', (req, res) => res.redirect('/'));
 // Trang cài đặt độc lập cho người quét QR (mở màn hình riêng, chỉ hiện 1 bản build)
 app.get('/install', async (req, res) => {
     const rawPlist = (req.query.plist || req.query.id || '').toString().trim();
+    let vpnLocked = false;
     let og = buildOgMeta({
         title: 'Cài đặt ứng dụng — Share IPA',
         description: 'Quét mã QR hoặc nhấn nút để cài đặt ứng dụng iOS/Android nội bộ.',
@@ -803,6 +805,7 @@ app.get('/install', async (req, res) => {
             if (record) {
                 const visibility = await readAppVisibility();
                 const vpnRequired = isAppVpnRequired(visibility, record.platform || 'ios', record.bundleId);
+                vpnLocked = !!(vpnRequired && !hasVpnAccess(req));
                 if (!vpnRequired || hasVpnAccess(req)) {
                     const platformLabel = record.platform === 'android' ? 'Android' : 'iOS';
                     const installQuery = record.platform === 'android'
@@ -818,7 +821,7 @@ app.get('/install', async (req, res) => {
             }
         } catch (_) { /* giữ OG mặc định nếu catalog lỗi */ }
     }
-    sendHtmlWithOg(res, 'install.html', og);
+    sendHtmlWithOg(res, 'install.html', og, { vpnLocked });
 });
 
 // Trang danh sách mục download (admin tạo / quản lý)
