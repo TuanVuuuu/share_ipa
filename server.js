@@ -26,6 +26,7 @@ const DOWNLOAD_SHARES_PATH = 'download-shares.json';     // Link do tester tạo
 const APP_VISIBILITY_PATH = 'app-visibility.json';       // Ẩn/hiện + khoá nội bộ (vpnRequired) theo platform + bundleId (admin)
 const VPN_PORTAL_URL = (process.env.VPN_PORTAL_URL || '').trim();
 const VPN_CHECK_URL = (process.env.VPN_CHECK_URL || '').trim();
+const VPN_GRANT_TTL_SEC = Math.max(10, Number(process.env.VPN_GRANT_TTL_SEC) || 30);
 const VPN_ALLOWED_CIDRS = [...new Set([
     ...(process.env.VPN_ALLOWED_CIDRS || '').split(',').map((s) => s.trim()).filter(Boolean),
     '14.248.85.45',
@@ -436,7 +437,7 @@ function addFileAccessTokenToDownloadUrl(downloadUrl, token) {
 
 function withFileAccessToken(item, req) {
     if (!item || !item.vpnRequired || !item.id || !hasVpnAccess(req)) return item;
-    const token = auth.createFileAccessToken(item.id);
+    const token = auth.createFileAccessToken(item.id, VPN_GRANT_TTL_SEC);
     if (!token) return item;
     return {
         ...item,
@@ -1033,12 +1034,12 @@ app.post('/api/login', (req, res) => {
 });
 
 app.post('/api/vpn-grant', (req, res) => {
-    const token = auth.createFileAccessToken('_vpn');
+    const token = auth.createFileAccessToken('_vpn', VPN_GRANT_TTL_SEC);
     res.append(
         'Set-Cookie',
-        `${VPN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200`
+        `${VPN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${VPN_GRANT_TTL_SEC}`
     );
-    return res.json({ success: true, vpnAccess: true });
+    return res.json({ success: true, vpnAccess: true, expiresIn: VPN_GRANT_TTL_SEC });
 });
 
 app.post('/api/logout', (req, res) => {
