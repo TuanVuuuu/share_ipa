@@ -25,7 +25,7 @@ const DOWNLOAD_PRODUCTS_PATH = 'download-products.json'; // Mục download do ad
 const DOWNLOAD_SHARES_PATH = 'download-shares.json';     // Link do tester tạo và lưu
 const APP_VISIBILITY_PATH = 'app-visibility.json';       // Ẩn/hiện + khoá nội bộ (vpnRequired) theo platform + bundleId (admin)
 const VPN_PORTAL_URL = (process.env.VPN_PORTAL_URL || '').trim();
-const VPN_CHECK_URL = (process.env.VPN_CHECK_URL || 'http://10.110.131.11:8888').trim();
+const VPN_CHECK_URL = (process.env.VPN_CHECK_URL || '').trim();
 const VPN_ALLOWED_CIDRS = [...new Set([
     ...(process.env.VPN_ALLOWED_CIDRS || '').split(',').map((s) => s.trim()).filter(Boolean),
     '14.248.85.45',
@@ -37,7 +37,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '53';
+const ASSET_VERSION = process.env.ASSET_VERSION || '54';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.

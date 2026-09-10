@@ -1,8 +1,8 @@
 (function (global) {
     function checkUrl() {
-        const raw = global.__VPN_CHECK_URL__;
-        if (raw && String(raw).indexOf('__VPN_CHECK__') === -1) return String(raw);
-        return 'http://10.110.131.11:8888';
+        const raw = String(global.__VPN_CHECK_URL__ || '').trim();
+        if (!raw || raw.indexOf('__VPN_CHECK__') !== -1) return '';
+        return raw;
     }
 
     async function grantAndReload() {
@@ -48,6 +48,10 @@
 
         openBtn.addEventListener('click', () => {
             const url = checkUrl();
+            if (!url) {
+                hint.textContent = 'Chưa cấu hình VPN_CHECK_URL trên server.';
+                return;
+            }
             popup = global.open(url, 'share-ipa-vpn-check');
             contBtn.style.display = '';
             if (!popup) {
