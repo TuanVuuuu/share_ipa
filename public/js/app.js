@@ -56,6 +56,8 @@ const protectedAreas = [dropZone, progressArea, resultZone];
 
 let isAuthenticated = false;
 let currentUser = null; // { username, role, permissions }
+let vpnAccess = false;
+let vpnInfo = null;
 let logsSource = null;
 
 function canDeleteBuild() {
@@ -228,11 +230,16 @@ if (homeView && appDetailView && window.CatalogDetail) {
         detailVisibilityBtn: document.getElementById('detail-visibility-btn'),
         detailDeleteAllBtn: document.getElementById('detail-delete-all-btn'),
         detailHiddenBadge: document.getElementById('detail-hidden-badge'),
+        detailVpnToggle: document.getElementById('detail-vpn-toggle'),
+        detailVpnCheckbox: document.getElementById('detail-vpn-checkbox'),
+        detailVpnBadge: document.getElementById('detail-vpn-badge'),
+        detailVpnGate: document.getElementById('detail-vpn-gate'),
         canDeleteBuild: canDeleteBuild,
         canManageApp: isAdmin,
         onDeleteBuild: handleDeleteBuild,
         onToggleVisibility: handleToggleVisibility,
         onDeleteAll: handleDeleteAll,
+        onToggleVpn: handleToggleVpn,
         qrModal: document.getElementById('qr-modal'),
         qrModalClose: document.getElementById('qr-modal-close'),
         qrModalTitle: document.getElementById('qr-modal-title'),
@@ -240,7 +247,9 @@ if (homeView && appDetailView && window.CatalogDetail) {
         qrModalImage: document.getElementById('qr-modal-image'),
         qrModalUrl: document.getElementById('qr-modal-url'),
         qrModalCopy: document.getElementById('qr-modal-copy'),
-        qrModalInstall: document.getElementById('qr-modal-install')
+        qrModalInstall: document.getElementById('qr-modal-install'),
+        qrModalVpn: document.getElementById('qr-modal-vpn'),
+        qrModalScanHint: document.getElementById('qr-modal-scan-hint')
     });
 
     document.getElementById('detail-back').addEventListener('click', () => history.back());
@@ -252,7 +261,7 @@ function showAppDetailPanel(group) {
     homeScrollY = window.scrollY;
     homeView.classList.add('spa-view-hidden');
     appDetailView.classList.remove('spa-view-hidden');
-    detailViewCtrl.renderAppDetail(group);
+    detailViewCtrl.renderAppDetail({ ...group, vpnAccess, vpn: group.vpn || vpnInfo });
     window.scrollTo(0, 0);
 }
 
@@ -386,6 +395,47 @@ async function handleToggleVisibility(group) {
     }
 }
 
+async function handleToggleVpn(group, vpnRequired) {
+    if (!isAdmin() || !group || !group.latest) return;
+    const bundleId = group.latest.bundleId;
+    const platform = group.latest.platform || 'ios';
+    if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(true);
+    try {
+        const res = await fetch('/api/catalog/vpn-required', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bundleId, platform, vpnRequired })
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.success) {
+            throw new Error((data && data.message) || 'Cập nhật VPN thất bại.');
+        }
+        catalogItems = catalogItems.map((item) => {
+            if ((item.bundleId || item.id) === bundleId && (item.platform || 'ios') === platform) {
+                return { ...item, vpnRequired };
+            }
+            return item;
+        });
+        renderCatalog(true);
+        const builds = getBuildsForBundle(bundleId, platform);
+        if (builds.length && detailViewCtrl) {
+            detailViewCtrl.renderAppDetail({
+                latest: builds[0],
+                builds,
+                hidden: group.hidden,
+                vpnRequired,
+                vpnAccess: group.vpnAccess,
+                vpn: group.vpn || vpnInfo,
+            });
+        }
+    } catch (err) {
+        alert(err.message);
+        const box = document.getElementById('detail-vpn-checkbox');
+        if (box) box.checked = !!group.vpnRequired;
+        if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(false);
+    }
+}
+
 async function handleDeleteAll(group) {
     if (!isAdmin() || !group || !group.latest) return;
     const bundleId = group.latest.bundleId;
@@ -498,6 +548,7 @@ async function loadDownloadProductsHome() {
                 <div class="dl-app-card-info">
                     <h4>${escapeHtml(product.name)}</h4>
                     ${product.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
+                    ${product.vpnRequired ? '<span class="detail-vpn-badge">Cần VPN</span>' : ''}
                     <p>${product.iosBundleId ? 'iOS' : '—'}${product.androidBundleId ? ' · Android' : ''}</p>
                 </div>
                 <span class="dl-app-card-arrow">›</span>
@@ -530,6 +581,7 @@ async function loadCatalog() {
             ...(Array.isArray(androidData.items) ? androidData.items : []),
         ];
         const configured = iosData.configured !== false && androidData.configured !== false;
+        vpnInfo = iosData.vpn || androidData.vpn || vpnInfo;
         if (!configured) {
             catalogSub.innerText = '⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO trong .env nên danh mục trống.';
         }
@@ -621,6 +673,8 @@ async function checkAuthStatus() {
         currentUser = data.authenticated
             ? { username: data.username, role: data.role, permissions: data.permissions || [] }
             : null;
+        vpnAccess = !!data.vpnAccess;
+        vpnInfo = data.vpn || null;
         applyAuthState(!!data.authenticated);
         if (data.authenticated) redirectIfNextParam();
     } catch (err) {
@@ -651,6 +705,8 @@ authForm.addEventListener('submit', async (e) => {
         }
         authForm.reset();
         currentUser = { username: data.username, role: data.role, permissions: data.permissions || [] };
+        vpnAccess = !!data.vpnAccess;
+        vpnInfo = data.vpn || vpnInfo;
         if (redirectIfNextParam()) return;
         applyAuthState(true);
     } catch (err) {

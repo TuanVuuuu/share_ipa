@@ -41,7 +41,6 @@ function isIosUa() {
 
 async function init() {
     const params = new URLSearchParams(window.location.search);
-    // Hỗ trợ cả link iOS cũ (?plist=...) và Android (?id=...)
     const buildId = params.get('plist') || params.get('id') || '';
 
     installBack.href = '/';
@@ -56,25 +55,36 @@ async function init() {
         return;
     }
 
-    // Fallback iOS: dựng sẵn link itms-services từ plist nếu metadata chưa tải được
-    // Fallback Android: link tải thẳng APK từ /uploads
     const looksLikePlist = buildId.toLowerCase().endsWith('.plist');
     const looksLikeApk = buildId.toLowerCase().endsWith('.apk');
-    if (looksLikePlist) {
-        const manifestUrl = `${window.location.origin}/uploads/${buildId}`;
-        installBtn.href = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
-    } else if (looksLikeApk) {
-        installBtn.href = `${window.location.origin}/uploads/${buildId}`;
-    } else {
-        installBtn.href = '#';
-    }
-
     let platform = looksLikeApk ? 'android' : (looksLikePlist ? 'ios' : null);
     let lanHintShown = false;
+    let vpnBlocked = false;
 
     try {
         const res = await fetch(`/api/app-info?${looksLikePlist ? 'plist' : 'id'}=${encodeURIComponent(buildId)}`);
         const data = await res.json();
+
+        if (data.vpnRequired) {
+            vpnBlocked = true;
+            stopLoading();
+            if (installBtn) installBtn.style.display = 'none';
+            if (installHint) installHint.style.display = 'none';
+            const gate = document.getElementById('vpn-gate-root');
+            if (gate && window.VpnGate) window.VpnGate.mount(gate, data.vpn || {});
+            installName.innerText = 'Cần kết nối VPN';
+            installBundle.innerText = data.message || 'Ứng dụng này không public.';
+            return;
+        }
+
+        if (looksLikePlist) {
+            const manifestUrl = `${window.location.origin}/uploads/${buildId}`;
+            installBtn.href = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
+        } else if (looksLikeApk) {
+            installBtn.href = `${window.location.origin}/uploads/${buildId}`;
+        } else {
+            installBtn.href = '#';
+        }
 
         if (res.ok && data.success && data.item) {
             const it = data.item;
@@ -155,6 +165,8 @@ async function init() {
     } finally {
         stopLoading();
     }
+
+    if (vpnBlocked) return;
 
     if (platform === 'android') {
         installBtn.innerText = 'Tải & cài đặt APK';

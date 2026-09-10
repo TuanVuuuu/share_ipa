@@ -1,4 +1,6 @@
 let isAdminUser = false;
+let sessionVpn = null;
+let sessionVpnAccess = false;
 
 const detailView = CatalogDetail.createDetailView({
     appDetailZone: document.getElementById('app-detail-zone'),
@@ -14,11 +16,16 @@ const detailView = CatalogDetail.createDetailView({
     detailVisibilityBtn: document.getElementById('detail-visibility-btn'),
     detailDeleteAllBtn: document.getElementById('detail-delete-all-btn'),
     detailHiddenBadge: document.getElementById('detail-hidden-badge'),
+    detailVpnToggle: document.getElementById('detail-vpn-toggle'),
+    detailVpnCheckbox: document.getElementById('detail-vpn-checkbox'),
+    detailVpnBadge: document.getElementById('detail-vpn-badge'),
+    detailVpnGate: document.getElementById('detail-vpn-gate'),
     canDeleteBuild: () => isAdminUser,
     canManageApp: () => isAdminUser,
     onDeleteBuild: handleDeleteBuild,
     onToggleVisibility: handleToggleVisibility,
     onDeleteAll: handleDeleteAll,
+    onToggleVpn: handleToggleVpn,
     qrModal: document.getElementById('qr-modal'),
     qrModalClose: document.getElementById('qr-modal-close'),
     qrModalTitle: document.getElementById('qr-modal-title'),
@@ -26,7 +33,9 @@ const detailView = CatalogDetail.createDetailView({
     qrModalImage: document.getElementById('qr-modal-image'),
     qrModalUrl: document.getElementById('qr-modal-url'),
     qrModalCopy: document.getElementById('qr-modal-copy'),
-    qrModalInstall: document.getElementById('qr-modal-install')
+    qrModalInstall: document.getElementById('qr-modal-install'),
+    qrModalVpn: document.getElementById('qr-modal-vpn'),
+    qrModalScanHint: document.getElementById('qr-modal-scan-hint')
 });
 
 function parseAppDetailRoute() {
@@ -48,11 +57,15 @@ function parseAppDetailRoute() {
     return { platform: 'ios', bundleId: '' };
 }
 
-function currentGroupFromBuilds(builds, hidden) {
+function currentGroupFromBuilds(builds, extra) {
+    const flags = extra || {};
     return {
         latest: builds[0],
         builds,
-        hidden: !!hidden,
+        hidden: !!flags.hidden,
+        vpnRequired: !!flags.vpnRequired,
+        vpnAccess: !!flags.vpnAccess,
+        vpn: flags.vpn || null,
     };
 }
 
@@ -80,9 +93,44 @@ async function handleToggleVisibility(group) {
             throw new Error((data && data.message) || 'Cập nhật ẩn/hiện thất bại.');
         }
         const builds = (group.builds || []).map((item) => ({ ...item, hidden: nextHidden }));
-        detailView.renderAppDetail(currentGroupFromBuilds(builds, nextHidden));
+        detailView.renderAppDetail(currentGroupFromBuilds(builds, {
+            hidden: nextHidden,
+            vpnRequired: group.vpnRequired,
+            vpnAccess: group.vpnAccess,
+            vpn: group.vpn,
+        }));
     } catch (err) {
         alert(err.message);
+        detailView.setAdminBusy(false);
+    }
+}
+
+async function handleToggleVpn(group, vpnRequired) {
+    if (!isAdminUser || !group || !group.latest) return;
+    const bundleId = group.latest.bundleId;
+    const platform = group.latest.platform || 'ios';
+    detailView.setAdminBusy(true);
+    try {
+        const res = await fetch('/api/catalog/vpn-required', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bundleId, platform, vpnRequired })
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.success) {
+            throw new Error((data && data.message) || 'Cập nhật VPN thất bại.');
+        }
+        const builds = (group.builds || []).map((item) => ({ ...item, vpnRequired }));
+        detailView.renderAppDetail(currentGroupFromBuilds(builds, {
+            hidden: group.hidden,
+            vpnRequired,
+            vpnAccess: group.vpnAccess,
+            vpn: group.vpn,
+        }));
+    } catch (err) {
+        alert(err.message);
+        const box = document.getElementById('detail-vpn-checkbox');
+        if (box) box.checked = !!group.vpnRequired;
         detailView.setAdminBusy(false);
     }
 }
@@ -159,6 +207,10 @@ async function loadAppDetail() {
             `/api/app-builds?bundle=${encodeURIComponent(bundleId)}&platform=${encodeURIComponent(platform)}`
         );
         const data = await res.json().catch(() => ({}));
+        if (data.vpnRequired && !res.ok && detailView.showVpnGate) {
+            detailView.showVpnGate(data.vpn, data.message);
+            return;
+        }
         if (!res.ok || !data.success) {
             detailView.showEmpty(data.message || 'Không tải được danh sách build.');
             return;
@@ -170,7 +222,12 @@ async function loadAppDetail() {
             return;
         }
 
-        detailView.renderAppDetail(currentGroupFromBuilds(builds, data.hidden));
+        detailView.renderAppDetail(currentGroupFromBuilds(builds, {
+            hidden: data.hidden,
+            vpnRequired: data.vpnRequired,
+            vpnAccess: data.vpnAccess != null ? !!data.vpnAccess : sessionVpnAccess,
+            vpn: data.vpn || sessionVpn,
+        }));
     } catch (err) {
         detailView.stopLoading();
         document.getElementById('detail-page-sub').innerText = `Lỗi: ${err.message}`;
@@ -182,6 +239,8 @@ async function init() {
         const authRes = await fetch('/api/auth-status');
         const authData = await authRes.json().catch(() => ({}));
         isAdminUser = !!(authData.authenticated && authData.role === 'admin');
+        sessionVpn = authData.vpn || null;
+        sessionVpnAccess = !!authData.vpnAccess;
     } catch (_) {
         isAdminUser = false;
     }

@@ -531,6 +531,90 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 .folder-card.is-hidden {
     opacity: 0.72;
 }
+.detail-vpn-badge {
+    display: inline-block;
+    margin-left: 6px;
+    background: #e8f1ff;
+    color: #1d4ed8;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-weight: 600;
+    font-size: 11px;
+    vertical-align: middle;
+}
+.app-card-info .detail-vpn-badge,
+.dl-app-card-info .detail-vpn-badge {
+    margin: 2px 0 4px;
+    margin-left: 0;
+}
+.vpn-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 13px;
+    color: #1d4ed8;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+.vpn-check input {
+    width: 16px;
+    height: 16px;
+    accent-color: #1d4ed8;
+}
+.vpn-gate-wrap {
+    margin: 12px 0 8px;
+}
+.vpn-gate {
+    text-align: left;
+    background: #f5f8ff;
+    border: 1px solid #dbe7ff;
+    border-radius: 14px;
+    padding: 16px;
+}
+.vpn-gate h3 {
+    margin: 0 0 8px;
+    font-size: 18px;
+}
+.vpn-gate p {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: #4b5563;
+}
+.vpn-cred {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.vpn-cred-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.vpn-cred-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #6b7280;
+    min-width: 72px;
+}
+.vpn-cred-value {
+    font-size: 13px;
+    background: #fff;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    word-break: break-all;
+}
+.vpn-gate .vpn-copy {
+    padding: 6px 10px;
+    font-size: 12px;
+}
+.vpn-lan-btn {
+    display: inline-block;
+}
 .catalog-sub {
     margin: 6px 0 18px;
     font-size: 13px;
@@ -773,7 +857,8 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 .app-detail-page.is-loading .catalog-sub { visibility: hidden; }
 .app-detail-page.is-loading #detail-share-btn,
 .app-detail-page.is-loading #detail-visibility-btn,
-.app-detail-page.is-loading #detail-delete-all-btn { visibility: hidden; }
+.app-detail-page.is-loading #detail-delete-all-btn,
+.app-detail-page.is-loading #detail-vpn-toggle { visibility: hidden; }
 
 .detail-content {
     animation: install-fade-in 0.3s ease;

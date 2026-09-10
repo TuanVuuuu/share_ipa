@@ -196,12 +196,17 @@
             <div class="detail-header" id="detail-header" style="display:none;">
                 <img src="" alt="icon" class="detail-icon" id="detail-icon">
                 <div class="detail-header-info">
-                    <h3><span id="detail-name"></span> <span class="detail-hidden-badge" id="detail-hidden-badge" style="display:none;">Đã ẩn</span></h3>
+                    <h3><span id="detail-name"></span> <span class="detail-hidden-badge" id="detail-hidden-badge" style="display:none;">Đã ẩn</span> <span class="detail-vpn-badge" id="detail-vpn-badge" style="display:none;">Cần VPN</span></h3>
                     <p id="detail-bundle"></p>
+                    <label class="vpn-check" id="detail-vpn-toggle" style="display:none;">
+                        <input type="checkbox" id="detail-vpn-checkbox">
+                        <span>Cần VPN để truy cập</span>
+                    </label>
                 </div>
             </div>
 
             <div id="detail-builds" class="detail-builds"></div>
+            <div id="detail-vpn-gate" class="vpn-gate-wrap" style="display:none;"></div>
         </div>
         <div id="detail-empty" class="catalog-empty" style="display:none;">Không tìm thấy ứng dụng trong danh mục.</div>
         <div id="detail-auth" class="catalog-empty" style="display:none;">
@@ -215,8 +220,9 @@
         <button type="button" class="modal-close" id="qr-modal-close" aria-label="Đóng">&times;</button>
         <h3 id="qr-modal-title">Tên ứng dụng</h3>
         <p class="qr-hint" id="qr-modal-version"></p>
+        <div id="qr-modal-vpn" class="vpn-gate-wrap" style="display:none;"></div>
         <div class="qr-code" id="qr-modal-image"></div>
-        <p class="qr-hint">Quét mã QR bằng Camera của iPhone để cài đặt ứng dụng</p>
+        <p class="qr-hint" id="qr-modal-scan-hint">Quét mã QR bằng Camera của iPhone để cài đặt ứng dụng</p>
         <div class="url-box">
             <input type="text" id="qr-modal-url" readonly value="">
             <button type="button" class="btn secondary" id="qr-modal-copy">Sao chép</button>
@@ -229,6 +235,7 @@
 window.__LAN_BASE_URL__ = "__LAN_BASE__";
 </script>
 <script src="/js/lan.js?v=__V__"></script>
+<script src="/js/vpn-gate.js?v=__V__"></script>
 <script src="/js/catalog-detail.js?v=__V__"></script>
 <script src="/js/app.js?v=__V__"></script>
 </body>

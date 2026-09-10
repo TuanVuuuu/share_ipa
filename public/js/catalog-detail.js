@@ -67,11 +67,16 @@
             detailVisibilityBtn,
             detailDeleteAllBtn,
             detailHiddenBadge,
+            detailVpnToggle,
+            detailVpnCheckbox,
+            detailVpnBadge,
+            detailVpnGate,
             canDeleteBuild,
             canManageApp,
             onDeleteBuild,
             onToggleVisibility,
             onDeleteAll,
+            onToggleVpn,
             qrModal,
             qrModalClose,
             qrModalTitle,
@@ -79,7 +84,9 @@
             qrModalImage,
             qrModalUrl,
             qrModalCopy,
-            qrModalInstall
+            qrModalInstall,
+            qrModalVpn,
+            qrModalScanHint
         } = refs;
 
         function buildBuildMetaTags(item) {
@@ -122,13 +129,29 @@
                 </details>`;
         }
 
+        let currentGroup = null;
+
         function openQrModal(item) {
+            const vpnBlocked = !!(currentGroup && currentGroup.vpnRequired && !currentGroup.vpnAccess);
             qrModalTitle.innerText = item.appName || 'Ứng dụng';
             qrModalVersion.innerText = `${item.bundleId || ''} • v${item.version} (Build ${item.buildNumber})`;
             qrModalUrl.value = item.shareUrl || '';
-            qrModalInstall.href = item.downloadUrl || '#';
-            if (window.LanTransfer) {
+            qrModalInstall.href = vpnBlocked ? (item.shareUrl || '#') : (item.downloadUrl || '#');
+            if (!vpnBlocked && window.LanTransfer) {
                 window.LanTransfer.applyDownloadHref(qrModalInstall, item);
+            }
+            if (qrModalVpn) {
+                if (vpnBlocked && window.VpnGate) {
+                    window.VpnGate.mount(qrModalVpn, (currentGroup && currentGroup.vpn) || {});
+                    if (qrModalImage) qrModalImage.style.display = 'none';
+                    if (qrModalScanHint) qrModalScanHint.style.display = 'none';
+                    if (qrModalInstall) qrModalInstall.style.display = 'none';
+                } else {
+                    if (window.VpnGate) window.VpnGate.hide(qrModalVpn);
+                    if (qrModalImage) qrModalImage.style.display = '';
+                    if (qrModalScanHint) qrModalScanHint.style.display = '';
+                    if (qrModalInstall) qrModalInstall.style.display = '';
+                }
             }
 
             // Cập nhật thẻ thông tin bổ sung trong modal
@@ -149,17 +172,19 @@
             }
 
             qrModalImage.innerHTML = '';
-            const img = document.createElement('img');
-            if (item.qr) {
-                img.src = item.qr;
-            } else if (item.shareUrl && typeof qrcode === 'function') {
-                const qr = qrcode(0, 'M');
-                qr.addData(item.shareUrl);
-                qr.make();
-                img.src = qr.createDataURL(8, 0);
+            if (!vpnBlocked) {
+                const img = document.createElement('img');
+                if (item.qr) {
+                    img.src = item.qr;
+                } else if (item.shareUrl && typeof qrcode === 'function') {
+                    const qr = qrcode(0, 'M');
+                    qr.addData(item.shareUrl);
+                    qr.make();
+                    img.src = qr.createDataURL(8, 0);
+                }
+                img.alt = 'QR cài đặt';
+                qrModalImage.appendChild(img);
             }
-            img.alt = 'QR cài đặt';
-            qrModalImage.appendChild(img);
 
             qrModal.style.display = 'flex';
         }
@@ -181,8 +206,6 @@
             detailShareBtn.addEventListener('click', () => copyText(window.location.href, detailShareBtn));
         }
 
-        let currentGroup = null;
-
         function syncAdminActions(group) {
             currentGroup = group || null;
             const canManage = typeof canManageApp === 'function' && canManageApp();
@@ -199,11 +222,22 @@
             if (detailHiddenBadge) {
                 detailHiddenBadge.style.display = hidden ? 'inline-block' : 'none';
             }
+            if (detailVpnBadge) {
+                detailVpnBadge.style.display = group && group.vpnRequired ? 'inline-block' : 'none';
+            }
+            if (detailVpnToggle) {
+                detailVpnToggle.style.display = canManage && group ? '' : 'none';
+            }
+            if (detailVpnCheckbox) {
+                detailVpnCheckbox.checked = !!(group && group.vpnRequired);
+                detailVpnCheckbox.disabled = false;
+            }
         }
 
         function setAdminBusy(busy) {
             if (detailVisibilityBtn) detailVisibilityBtn.disabled = !!busy;
             if (detailDeleteAllBtn) detailDeleteAllBtn.disabled = !!busy;
+            if (detailVpnCheckbox) detailVpnCheckbox.disabled = !!busy;
         }
 
         if (detailVisibilityBtn && typeof onToggleVisibility === 'function') {
@@ -216,6 +250,12 @@
             detailDeleteAllBtn.addEventListener('click', () => {
                 if (!currentGroup) return;
                 onDeleteAll(currentGroup);
+            });
+        }
+        if (detailVpnCheckbox && typeof onToggleVpn === 'function') {
+            detailVpnCheckbox.addEventListener('change', () => {
+                if (!currentGroup) return;
+                onToggleVpn(currentGroup, !!detailVpnCheckbox.checked);
             });
         }
 
@@ -232,12 +272,15 @@
             detailEmpty.style.display = 'none';
             if (detailAuth) detailAuth.style.display = 'none';
             if (detailShareBtn) detailShareBtn.style.display = 'none';
+            if (detailVpnGate && window.VpnGate) window.VpnGate.hide(detailVpnGate);
+            else if (detailVpnGate) detailVpnGate.style.display = 'none';
             syncAdminActions(null);
         }
 
         function renderBuilds(builds) {
             detailBuilds.innerHTML = '';
             const showDelete = typeof canDeleteBuild === 'function' && canDeleteBuild();
+            const vpnBlocked = !!(currentGroup && currentGroup.vpnRequired && !currentGroup.vpnAccess);
             builds.forEach((build, index) => {
                 const metaTags = buildBuildMetaTags(build);
                 const devicesBlock = buildDevicesBlock(build);
@@ -254,13 +297,13 @@
                     </div>
                     <div class="build-actions">
                         <button type="button" class="btn secondary qr-btn">Xem QR</button>
-                        <a class="btn install-mini" href="${escapeHtml(build.downloadUrl || '#')}">Cài đặt</a>
+                        <a class="btn install-mini" href="${escapeHtml((vpnBlocked && build.shareUrl) || build.downloadUrl || '#')}">Cài đặt</a>
                         ${showDelete ? '<button type="button" class="btn danger delete-build-btn">Xóa</button>' : ''}
                     </div>
                 `;
                 row.querySelector('.qr-btn').addEventListener('click', () => openQrModal(build));
                 const installLink = row.querySelector('.install-mini');
-                if (installLink && window.LanTransfer) {
+                if (installLink && window.LanTransfer && !vpnBlocked) {
                     window.LanTransfer.applyDownloadHref(installLink, build);
                 }
                 const deleteBtn = row.querySelector('.delete-build-btn');
@@ -278,6 +321,8 @@
             const platformLabel = platform === 'android' ? 'Android' : 'iOS';
             const hidden = !!(group.hidden || (latest && latest.hidden));
             group.hidden = hidden;
+            group.vpnRequired = !!(group.vpnRequired || (latest && latest.vpnRequired));
+            group.vpnAccess = !!group.vpnAccess;
 
             detailIcon.src = latest.icon || FALLBACK_ICON;
             detailIcon.onerror = () => { detailIcon.src = FALLBACK_ICON; };
@@ -291,8 +336,20 @@
 
             if (detailShareBtn) detailShareBtn.style.display = 'inline-block';
             detailHeader.style.display = 'flex';
+            if (detailVpnGate && window.VpnGate) window.VpnGate.hide(detailVpnGate);
             syncAdminActions(group);
             renderBuilds(builds);
+        }
+
+        function showVpnGate(vpnInfo, message) {
+            stopLoading();
+            detailPageSub.innerText = message || 'Ứng dụng này cần kết nối VPN để xem QR và tải bản build.';
+            detailHeader.style.display = 'none';
+            detailBuilds.innerHTML = '';
+            detailEmpty.style.display = 'none';
+            if (detailShareBtn) detailShareBtn.style.display = 'none';
+            if (detailVpnGate && window.VpnGate) window.VpnGate.mount(detailVpnGate, vpnInfo || {});
+            syncAdminActions(null);
         }
 
         function showAuthRequired() {
@@ -317,6 +374,7 @@
             renderAppDetail,
             showAuthRequired,
             showEmpty,
+            showVpnGate,
             stopLoading,
             setAdminBusy
         };
@@ -338,6 +396,7 @@
             g.latest = g.builds[0];
             g.count = g.builds.length;
             g.hidden = g.builds.some((b) => b.hidden);
+            g.vpnRequired = g.builds.some((b) => b.vpnRequired);
         });
         return groups.sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
     }
@@ -366,6 +425,7 @@
                 <div class="app-card-info">
                     <h4>${escapeHtml(latest.appName)}</h4>
                     ${group.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
+                    ${group.vpnRequired ? '<span class="detail-vpn-badge">Cần VPN</span>' : ''}
                     <p class="app-card-bundle">${escapeHtml(latest.bundleId)}</p>
                 </div>
             </div>

@@ -29,6 +29,9 @@ const pickAdminActions = document.getElementById('pick-admin-actions');
 const pickVisibilityBtn = document.getElementById('pick-visibility-btn');
 const pickDeleteProductBtn = document.getElementById('pick-delete-product-btn');
 const pickDeleteAllSharesBtn = document.getElementById('pick-delete-all-shares-btn');
+const pickVpnToggle = document.getElementById('pick-vpn-toggle');
+const pickVpnCheckbox = document.getElementById('pick-vpn-checkbox');
+const pickVpnBadge = document.getElementById('pick-vpn-badge');
 
 const adminForm = document.getElementById('admin-product-form');
 const adminFormTitle = document.getElementById('admin-form-title');
@@ -85,6 +88,12 @@ function syncPickAdminActions(product) {
     const canManage = isAdmin() && !!product;
     if (pickAdminActions) pickAdminActions.style.display = canManage ? '' : 'none';
     if (pickHiddenBadge) pickHiddenBadge.style.display = product && product.hidden ? 'inline-block' : 'none';
+    if (pickVpnBadge) pickVpnBadge.style.display = product && product.vpnRequired ? 'inline-block' : 'none';
+    if (pickVpnToggle) pickVpnToggle.style.display = canManage ? '' : 'none';
+    if (pickVpnCheckbox) {
+        pickVpnCheckbox.checked = !!(product && product.vpnRequired);
+        pickVpnCheckbox.disabled = false;
+    }
     if (pickVisibilityBtn) {
         pickVisibilityBtn.textContent = product && product.hidden ? 'Hiện' : 'Ẩn';
         pickVisibilityBtn.disabled = false;
@@ -100,6 +109,7 @@ function setPickAdminBusy(busy) {
     if (pickVisibilityBtn) pickVisibilityBtn.disabled = !!busy;
     if (pickDeleteProductBtn) pickDeleteProductBtn.disabled = !!busy;
     if (pickDeleteAllSharesBtn) pickDeleteAllSharesBtn.disabled = !!busy;
+    if (pickVpnCheckbox) pickVpnCheckbox.disabled = !!busy;
 }
 
 function setPreviewImage(imgEl, src, fallbackAlt) {
@@ -290,6 +300,7 @@ function renderProductList() {
             <div class="dl-app-card-info">
                 <h4>${escapeHtml(product.name)}</h4>
                 ${product.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
+                ${product.vpnRequired ? '<span class="detail-vpn-badge">Cần VPN</span>' : ''}
                 <p>${product.iosBundleId ? 'iOS' : '—'}${product.androidBundleId ? ' · Android' : ''}</p>
             </div>
             <span class="dl-app-card-arrow">›</span>
@@ -415,6 +426,20 @@ async function deleteAllSavedShares(product) {
         throw new Error((data && data.message) || 'Xóa tất cả link đã lưu thất bại.');
     }
     return true;
+}
+
+async function toggleProductVpn(product, vpnRequired) {
+    if (!isAdmin() || !product) return null;
+    const res = await fetch('/api/download-products/vpn-required', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: product.id, vpnRequired }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.success) {
+        throw new Error((data && data.message) || 'Cập nhật VPN thất bại.');
+    }
+    return data.item;
 }
 
 async function loadSavedShares(productId) {
@@ -754,6 +779,26 @@ if (pickDeleteAllSharesBtn) {
             syncPickAdminActions(currentProduct);
         } catch (err) {
             alert(err.message);
+            setPickAdminBusy(false);
+        }
+    });
+}
+
+if (pickVpnCheckbox) {
+    pickVpnCheckbox.addEventListener('change', async () => {
+        if (!currentProduct) return;
+        setPickAdminBusy(true);
+        try {
+            const updated = await toggleProductVpn(currentProduct, !!pickVpnCheckbox.checked);
+            if (!updated) {
+                setPickAdminBusy(false);
+                return;
+            }
+            currentProduct = updated;
+            syncPickAdminActions(currentProduct);
+        } catch (err) {
+            alert(err.message);
+            pickVpnCheckbox.checked = !!currentProduct.vpnRequired;
             setPickAdminBusy(false);
         }
     });

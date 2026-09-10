@@ -174,14 +174,32 @@ async function renderBuild(item) {
     }
 }
 
+function showVpnGate(vpn, message) {
+    stopLoading();
+    dlContent.style.display = 'none';
+    dlError.style.display = 'none';
+    tabIos.style.display = 'none';
+    tabAndroid.style.display = 'none';
+    const gate = document.getElementById('vpn-gate-root');
+    if (gate && window.VpnGate) window.VpnGate.mount(gate, vpn || {});
+    setCategoryTitle(message || 'Cần kết nối VPN');
+}
+
 async function fetchBuild(id) {
     if (!id) return null;
     try {
         const res = await fetch(`/api/app-info?id=${encodeURIComponent(id)}`);
         const data = await res.json();
+        if (data.vpnRequired) {
+            const err = new Error(data.message || 'Cần kết nối VPN');
+            err.vpnRequired = true;
+            err.vpn = data.vpn;
+            throw err;
+        }
         if (!res.ok || !data.success || !data.item) return null;
         return data.item;
-    } catch (_) {
+    } catch (err) {
+        if (err && err.vpnRequired) throw err;
         return null;
     }
 }
@@ -200,6 +218,10 @@ async function init() {
         try {
             const res = await fetch(`/api/download-shares/${encodeURIComponent(shareId)}`);
             const data = await res.json();
+            if (data.vpnRequired) {
+                showVpnGate(data.vpn, data.message);
+                return;
+            }
             if (!res.ok || !data.success || !data.item) {
                 throw new Error(data.message || 'Không tìm thấy link chia sẻ.');
             }
@@ -291,6 +313,10 @@ async function init() {
         stopLoading();
         setActiveTab(initial);
     } catch (err) {
+        if (err && err.vpnRequired) {
+            showVpnGate(err.vpn, err.message);
+            return;
+        }
         showError(err.message || 'Không tải được thông tin bản build.');
         setCategoryTitle(productTitle);
         setCategoryIcon(productIcon, productTitle);
