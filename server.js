@@ -9,6 +9,7 @@ require('dotenv').config({
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
+const crypto = require('crypto');
 const dns = require('dns').promises;
 const AppInfoParser = require('app-info-parser');
 const QRCode = require('qrcode');
@@ -34,7 +35,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '47';
+const ASSET_VERSION = process.env.ASSET_VERSION || '48';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -122,6 +123,9 @@ console.log('=========================');
 const app = express();
 const PORT = Number(process.env.PORT) || 3081;
 const AUTH_COOKIE_NAME = 'share_ipa_auth';
+const VPN_COOKIE_NAME = 'share_ipa_vpn';
+const VPN_TOKEN_SECRET = process.env.SESSION_SECRET || 'share-ipa-local-secret-change-me';
+const VPN_TUNNEL_CIDRS = ['172.20.0.0/16', '10.8.0.0/16', '172.27.0.0/16'];
 
 const { execFileSync } = require('child_process');
 
@@ -369,11 +373,115 @@ setInterval(() => {
     refreshVpnPortalEgressIps().catch(() => {});
 }, 5 * 60 * 1000).unref();
 
+function collectClientIps(req) {
+    const ips = [];
+    const add = (raw) => {
+        const ip = String(raw || '').trim().replace(/^::ffff:/, '');
+        if (!ip || ip === '127.0.0.1' || ip === '::1') return;
+        if (!ips.includes(ip)) ips.push(ip);
+    };
+    const cf = (req.headers['cf-connecting-ip'] || '').toString().trim();
+    if (cf) {
+        add(cf);
+        return ips;
+    }
+    String(req.headers['x-forwarded-for'] || '').split(',').forEach(add);
+    add(req.headers['x-real-ip']);
+    add(req.socket && req.socket.remoteAddress);
+    return ips;
+}
+
+function createVpnToken(ttlMs) {
+    const payload = Buffer.from(JSON.stringify({ v: 1, exp: Date.now() + ttlMs }), 'utf8').toString('base64url');
+    const sig = crypto.createHmac('sha256', VPN_TOKEN_SECRET).update(payload).digest('hex');
+    return `${payload}.${sig}`;
+}
+
+function verifyVpnToken(token) {
+    if (!token || typeof token !== 'string' || !token.includes('.')) return false;
+    const [payload, signature] = token.split('.');
+    if (!payload || !signature) return false;
+    const expected = crypto.createHmac('sha256', VPN_TOKEN_SECRET).update(payload).digest('hex');
+    const a = Buffer.from(signature);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+    try {
+        const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+        return !!(data && data.v === 1 && Number(data.exp) > Date.now());
+    } catch (_) {
+        return false;
+    }
+}
+
+function hasVpnGrantCookie(req) {
+    const cookies = parseCookies(req.headers.cookie || '');
+    return verifyVpnToken(cookies[VPN_COOKIE_NAME]);
+}
+
+function vpnCookieHeader(token, req) {
+    const proto = (req.headers['x-forwarded-proto'] || req.protocol || '').toString().split(',')[0].trim();
+    const secure = proto === 'https';
+    return `${VPN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200${secure ? '; Secure' : ''}`;
+}
+
+function isAllowedGrantReturnUrl(raw) {
+    try {
+        const u = new URL(String(raw || ''));
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+        const publicOrigin = new URL(PUBLIC_BASE_URL).origin;
+        if (u.origin === publicOrigin) return true;
+        return u.hostname === 'share-ipa.vunt.site' || u.hostname === 'share-ipa.vunt.info';
+    } catch (_) {
+        return false;
+    }
+}
+
+function canIssueVpnGrant(req) {
+    if (isLanRequest(req)) return true;
+    const ips = collectClientIps(req);
+    return ips.some((ip) => (
+        (isPrivateHostname(ip) && ip !== '127.0.0.1')
+        || VPN_TUNNEL_CIDRS.some((cidr) => ipMatchesCidr(ip, cidr))
+    ));
+}
+
+function sendVpnGrant(req, res) {
+    setLanCors(res);
+    if (!canIssueVpnGrant(req)) {
+        res.statusCode = 403;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(JSON.stringify({ success: false, message: 'Yêu cầu truy cập bị từ chối.' }));
+        return;
+    }
+    const token = createVpnToken(12 * 60 * 60 * 1000);
+    const nextRaw = (() => {
+        try {
+            return new URL(req.originalUrl || req.url || '/', 'http://127.0.0.1').searchParams.get('next') || '';
+        } catch (_) {
+            return '';
+        }
+    })();
+    if (isAllowedGrantReturnUrl(nextRaw)) {
+        const dest = new URL(nextRaw);
+        dest.searchParams.set('vpn_grant', token);
+        res.statusCode = 302;
+        res.setHeader('Location', dest.toString());
+        res.end();
+        return;
+    }
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(JSON.stringify({ success: true, token }));
+}
+
 function hasVpnAccess(req) {
     if (isLanRequest(req)) return true;
-    const ip = getExternalClientIp(req);
-    if (!ip) return false;
-    return [...VPN_ALLOWED_CIDRS, ...vpnPortalEgressIps].some((cidr) => ipMatchesCidr(ip, cidr));
+    if (hasVpnGrantCookie(req)) return true;
+    const ips = collectClientIps(req);
+    const allowed = [...VPN_ALLOWED_CIDRS, ...vpnPortalEgressIps, ...VPN_TUNNEL_CIDRS];
+    return ips.some((ip) => allowed.some((cidr) => ipMatchesCidr(ip, cidr)));
 }
 
 function vpnClientInfo(req) {
@@ -509,12 +617,15 @@ function sendLanInfo(req, res) {
 app.use((req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'OPTIONS') return next();
     const p = req.path || '';
-    if (p !== '/api/lan-info' && p !== '/api/lan' && p !== '/api/lan-ping' && p !== '/api/lan-pixel') {
+    if (p !== '/api/lan-info' && p !== '/api/lan' && p !== '/api/lan-ping' && p !== '/api/lan-pixel' && p !== '/api/vpn-grant') {
         return next();
     }
     if (req.method === 'OPTIONS') {
         setLanCors(res);
         return res.status(204).end();
+    }
+    if (p === '/api/vpn-grant') {
+        return sendVpnGrant(req, res);
     }
     if (p === '/api/lan-ping') {
         setLanCors(res);
@@ -703,6 +814,19 @@ app.options('/api/lan-pixel', (req, res) => {
 });
 app.get('/api/lan-info', sendLanInfo);
 app.get('/api/lan', sendLanInfo);
+app.get('/api/vpn-grant', sendVpnGrant);
+app.options('/api/vpn-grant', (req, res) => {
+    setLanCors(res);
+    res.status(204).end();
+});
+app.post('/api/vpn-redeem', (req, res) => {
+    const token = (req.body?.token || req.query.token || '').toString().trim();
+    if (!verifyVpnToken(token)) {
+        return res.status(403).json({ success: false, message: 'Yêu cầu truy cập bị từ chối.' });
+    }
+    res.setHeader('Set-Cookie', vpnCookieHeader(token, req));
+    return res.json({ success: true, vpnAccess: true });
+});
 
 // Đường dẫn /login cũ giờ trỏ thẳng về trang chính (ô đăng nhập nằm ngay trong trang)
 app.get('/login', (req, res) => res.redirect('/'));
@@ -3042,6 +3166,7 @@ function tryHandleLanRequest(req, res) {
         && pathname !== '/api/lan'
         && pathname !== '/api/lan-ping'
         && pathname !== '/api/lan-pixel'
+        && pathname !== '/api/vpn-grant'
     ) {
         return false;
     }
@@ -3050,6 +3175,10 @@ function tryHandleLanRequest(req, res) {
         setLanCors(res);
         res.writeHead(204);
         res.end();
+        return true;
+    }
+    if (pathname === '/api/vpn-grant') {
+        sendVpnGrant(req, res);
         return true;
     }
     if (pathname === '/api/lan-ping') {

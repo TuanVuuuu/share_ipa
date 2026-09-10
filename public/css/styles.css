@@ -649,8 +649,10 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     padding: 6px 10px;
     font-size: 12px;
 }
-.vpn-lan-btn {
-    display: inline-block;
+.vpn-gate .vpn-lan-btn {
+    display: inline-flex;
+    margin-top: 16px;
+    text-decoration: none;
 }
 .catalog-sub {
     margin: 6px 0 18px;
