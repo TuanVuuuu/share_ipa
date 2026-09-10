@@ -142,7 +142,7 @@
             }
             if (qrModalVpn) {
                 if (vpnBlocked && window.VpnGate) {
-                    window.VpnGate.mount(qrModalVpn, (currentGroup && currentGroup.vpn) || {});
+                    window.VpnGate.mount(qrModalVpn);
                     if (qrModalImage) qrModalImage.style.display = 'none';
                     if (qrModalScanHint) qrModalScanHint.style.display = 'none';
                     if (qrModalInstall) qrModalInstall.style.display = 'none';
@@ -341,14 +341,14 @@
             renderBuilds(builds);
         }
 
-        function showVpnGate(vpnInfo, message) {
+        function showVpnGate() {
             stopLoading();
-            detailPageSub.innerText = message || 'Ứng dụng này cần kết nối VPN để xem QR và tải bản build.';
+            detailPageSub.innerText = '';
             detailHeader.style.display = 'none';
             detailBuilds.innerHTML = '';
             detailEmpty.style.display = 'none';
             if (detailShareBtn) detailShareBtn.style.display = 'none';
-            if (detailVpnGate && window.VpnGate) window.VpnGate.mount(detailVpnGate, vpnInfo || {});
+            if (detailVpnGate && window.VpnGate) window.VpnGate.mount(detailVpnGate);
             syncAdminActions(null);
         }
 

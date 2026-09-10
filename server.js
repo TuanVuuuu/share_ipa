@@ -34,7 +34,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '44';
+const ASSET_VERSION = process.env.ASSET_VERSION || '46';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -377,12 +377,9 @@ function hasVpnAccess(req) {
 }
 
 function vpnClientInfo(req) {
-    const info = {
+    return {
         vpnAccess: hasVpnAccess(req),
-        clientIp: getExternalClientIp(req) || '',
     };
-    if (VPN_PORTAL_URL) info.portalUrl = VPN_PORTAL_URL;
-    return info;
 }
 
 function withVpnHint(payload, items, req) {
@@ -397,7 +394,7 @@ function denyVpnRequired(res, req, message) {
         vpnRequired: true,
         vpnAccess: false,
         vpn: vpnClientInfo(req),
-        message: message || 'Ứng dụng này cần kết nối VPN để truy cập.',
+        message: message || 'Yêu cầu truy cập bị từ chối. Liên hệ Admin để được cấp quyền truy cập.',
     });
 }
 

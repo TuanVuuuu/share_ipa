@@ -174,15 +174,16 @@ async function renderBuild(item) {
     }
 }
 
-function showVpnGate(vpn, message) {
+function showVpnGate() {
     stopLoading();
     dlContent.style.display = 'none';
     dlError.style.display = 'none';
     tabIos.style.display = 'none';
     tabAndroid.style.display = 'none';
+    setCategoryTitle('');
+    setCategoryIcon('');
     const gate = document.getElementById('vpn-gate-root');
-    if (gate && window.VpnGate) window.VpnGate.mount(gate, vpn || {});
-    setCategoryTitle(message || 'Cần kết nối VPN');
+    if (gate && window.VpnGate) window.VpnGate.mount(gate);
 }
 
 async function fetchBuild(id) {

@@ -68,12 +68,12 @@ async function init() {
         if (data.vpnRequired) {
             vpnBlocked = true;
             stopLoading();
+            const content = document.getElementById('install-content');
+            if (content) content.style.display = 'none';
             if (installBtn) installBtn.style.display = 'none';
             if (installHint) installHint.style.display = 'none';
             const gate = document.getElementById('vpn-gate-root');
-            if (gate && window.VpnGate) window.VpnGate.mount(gate, data.vpn || {});
-            installName.innerText = 'Cần kết nối VPN';
-            installBundle.innerText = data.message || 'Ứng dụng này không public.';
+            if (gate && window.VpnGate) window.VpnGate.mount(gate);
             return;
         }
 
