@@ -103,10 +103,47 @@ function verifySessionToken(token) {
     }
 }
 
+function fileAccessId(filename) {
+    return path.basename(String(filename || '')).replace(/\.plist$/i, '');
+}
+
+function createFileAccessToken(filename, ttlSec = 12 * 60 * 60) {
+    const id = fileAccessId(filename);
+    if (!id) return '';
+    const exp = Math.floor(Date.now() / 1000) + ttlSec;
+    const payload = Buffer.from(`${id}.${exp}`, 'utf8').toString('base64url');
+    return `${payload}.${sign(payload)}`;
+}
+
+function verifyFileAccessToken(token, filename) {
+    if (!token || typeof token !== 'string' || !token.includes('.')) return false;
+    const [payload, signature] = token.split('.');
+    if (!payload || !signature) return false;
+
+    const expected = sign(payload);
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) return false;
+
+    try {
+        const decoded = Buffer.from(payload, 'base64url').toString('utf8');
+        const lastDot = decoded.lastIndexOf('.');
+        if (lastDot <= 0) return false;
+        const id = decoded.slice(0, lastDot);
+        const exp = Number(decoded.slice(lastDot + 1));
+        if (!id || !Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+        return id === fileAccessId(filename);
+    } catch (_) {
+        return false;
+    }
+}
+
 module.exports = {
     verifyCredentials,
     createSessionToken,
     verifySessionToken,
+    createFileAccessToken,
+    verifyFileAccessToken,
     hasPermission,
     getPermissions,
     toPublicUser,

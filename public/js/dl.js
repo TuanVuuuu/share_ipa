@@ -174,7 +174,7 @@ async function renderBuild(item) {
     }
 }
 
-function showVpnGate() {
+function showVpnGate(needLogin) {
     stopLoading();
     dlContent.style.display = 'none';
     dlError.style.display = 'none';
@@ -194,8 +194,9 @@ async function fetchBuild(id) {
         const res = await fetch(`/api/app-info?id=${encodeURIComponent(id)}`);
         const data = await res.json();
         if (data.vpnRequired) {
-            const err = new Error(data.message || 'Cần kết nối VPN');
+            const err = new Error(data.message || 'Cần kiểm tra mạng VPN');
             err.vpnRequired = true;
+            err.needLogin = data.needLogin !== false;
             err.vpn = data.vpn;
             throw err;
         }
@@ -208,9 +209,6 @@ async function fetchBuild(id) {
 }
 
 async function init() {
-    if (window.VpnGate && window.VpnGate.ready) {
-        await window.VpnGate.ready;
-    }
     const params = new URLSearchParams(window.location.search);
     const shareId = (params.get('s') || '').trim();
     let iosId = (params.get('ios') || '').trim();
@@ -225,7 +223,7 @@ async function init() {
             const res = await fetch(`/api/download-shares/${encodeURIComponent(shareId)}`);
             const data = await res.json();
             if (data.vpnRequired) {
-                showVpnGate(data.vpn, data.message);
+                showVpnGate(data.needLogin);
                 return;
             }
             if (!res.ok || !data.success || !data.item) {
@@ -320,7 +318,7 @@ async function init() {
         setActiveTab(initial);
     } catch (err) {
         if (err && err.vpnRequired) {
-            showVpnGate(err.vpn, err.message);
+            showVpnGate(err.needLogin);
             return;
         }
         showError(err.message || 'Không tải được thông tin bản build.');

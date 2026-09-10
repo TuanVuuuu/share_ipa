@@ -1,76 +1,71 @@
 (function (global) {
+    function checkUrl() {
+        const raw = global.__VPN_CHECK_URL__;
+        if (raw && String(raw).indexOf('__VPN_CHECK__') === -1) return String(raw);
+        return 'http://10.110.131.11:8888';
+    }
+
+    async function grantAndReload() {
+        const res = await fetch('/api/vpn-grant', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            throw new Error(data.message || 'Không xác thực được mạng.');
+        }
+        global.location.reload();
+    }
+
     function render() {
         const wrap = document.createElement('div');
         wrap.className = 'vpn-gate';
         wrap.innerHTML = `
-            <h3>Yêu cầu truy cập bị từ chối</h3>
-            <p>Liên hệ Admin để được cấp quyền truy cập.</p>
+            <h3>Kiểm tra mạng</h3>
+            <p data-vpn-hint>Ứng dụng này cần VPN. Bấm xác thực để mở trang kiểm tra. Nếu chưa bật VPN, trình duyệt sẽ báo lỗi mạng.</p>
+            <div class="vpn-gate-actions">
+                <button type="button" class="btn vpn-lan-btn" data-vpn-open>Xác thực mạng</button>
+                <button type="button" class="btn secondary" data-vpn-continue style="display:none;">Trang đã mở được — tiếp tục</button>
+            </div>
         `;
         return wrap;
     }
 
-    function isTunnelIp(ip) {
-        const n = String(ip || '').split('.').map(Number);
-        if (n.length !== 4 || n.some((x) => !Number.isInteger(x))) return false;
-        if (n[0] === 172 && n[1] === 20) return true;
-        if (n[0] === 10 && n[1] === 8) return true;
-        if (n[0] === 172 && n[1] === 27) return true;
-        return false;
-    }
+    function bind(wrap) {
+        const hint = wrap.querySelector('[data-vpn-hint]');
+        const openBtn = wrap.querySelector('[data-vpn-open]');
+        const contBtn = wrap.querySelector('[data-vpn-continue]');
+        if (!openBtn || !contBtn || !hint) return;
 
-    function discoverLocalIpv4s() {
-        return new Promise((resolve) => {
-            const RTC = global.RTCPeerConnection || global.webkitRTCPeerConnection;
-            if (!RTC) {
-                resolve([]);
+        let popup = null;
+
+        const finish = () => {
+            if (popup && !popup.closed) {
+                try { popup.close(); } catch (_) { /* iOS có thể không đóng tab */ }
+            }
+            popup = null;
+            grantAndReload().catch((err) => {
+                hint.textContent = err.message || 'Không xác thực được mạng.';
+            });
+        };
+
+        openBtn.addEventListener('click', () => {
+            const url = checkUrl();
+            popup = global.open(url, 'share-ipa-vpn-check');
+            contBtn.style.display = '';
+            if (!popup) {
+                hint.textContent = 'Không mở được tab mới. Tự mở ' + url + ' trên trình duyệt. Nếu vào được thì quay lại đây và bấm Tiếp tục.';
                 return;
             }
-            const ips = new Set();
-            let pc;
-            const finish = () => {
-                try { if (pc) pc.close(); } catch (_) { /* ignore */ }
-                resolve([...ips]);
-            };
-            const timer = setTimeout(finish, 900);
-            try {
-                pc = new RTC({ iceServers: [] });
-                pc.createDataChannel('vpn');
-                pc.onicecandidate = (e) => {
-                    const cand = e && e.candidate && e.candidate.candidate;
-                    if (!cand) return;
-                    const m = cand.match(/([0-9]{1,3}(?:\.[0-9]{1,3}){3})/);
-                    if (m) ips.add(m[1]);
-                };
-                pc.createOffer().then((offer) => pc.setLocalDescription(offer)).catch(() => {
-                    clearTimeout(timer);
-                    finish();
-                });
-            } catch (_) {
-                clearTimeout(timer);
-                finish();
-            }
+            hint.textContent = 'Đã mở trang kiểm tra. Nếu trình duyệt báo lỗi mạng: đóng tab đó, bật VPN rồi xác thực lại. Nếu vào được: bấm Tiếp tục — tab kiểm tra sẽ đóng và quay về đây.';
         });
-    }
 
-    async function attestTunnel() {
-        const ips = (await discoverLocalIpv4s()).filter(isTunnelIp);
-        if (!ips.length) return false;
-        const res = await fetch('/api/vpn-attest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ ips }),
-        });
-        const data = await res.json().catch(() => null);
-        return !!(data && data.success);
+        contBtn.addEventListener('click', finish);
     }
-
-    const ready = attestTunnel().catch(() => false);
 
     function mount(container) {
         if (!container) return;
         container.innerHTML = '';
-        container.appendChild(render());
+        const wrap = render();
+        container.appendChild(wrap);
+        bind(wrap);
         const inModal = !!container.closest('.modal-card');
         container.classList.toggle('is-open', !inModal);
         container.classList.toggle('is-embedded', inModal);
@@ -87,5 +82,5 @@
         container.style.display = 'none';
     }
 
-    global.VpnGate = { render, mount, hide, ready };
+    global.VpnGate = { render, mount, hide };
 })(window);

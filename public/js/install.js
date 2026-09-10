@@ -40,9 +40,6 @@ function isIosUa() {
 }
 
 async function init() {
-    if (window.VpnGate && window.VpnGate.ready) {
-        await window.VpnGate.ready;
-    }
     const params = new URLSearchParams(window.location.search);
     const buildId = params.get('plist') || params.get('id') || '';
 
@@ -79,91 +76,96 @@ async function init() {
             const brand = document.querySelector('.install-brand');
             if (brand) brand.style.display = 'none';
             const gate = document.getElementById('vpn-gate-root');
-            if (gate && window.VpnGate) window.VpnGate.mount(gate);
+            if (gate && window.VpnGate) {
+                window.VpnGate.mount(gate);
+            }
             return;
         }
 
-        if (looksLikePlist) {
-            const manifestUrl = `${window.location.origin}/uploads/${buildId}`;
+        if (!res.ok || !data.success || !data.item) {
+            throw new Error(data.message || 'Không tải được thông tin bản build.');
+        }
+
+        const it = data.item;
+        platform = it.platform || platform || 'ios';
+        const defaultName = platform === 'android' ? 'Ứng dụng Android' : 'Ứng dụng iOS';
+
+        installName.innerText = it.appName || defaultName;
+        installBundle.innerText = it.bundleId || '';
+        installVersion.innerText = `Phiên bản ${it.version} • Build ${it.buildNumber}`;
+        installVersion.style.display = 'inline-block';
+        if (it.icon) installIcon.src = it.icon;
+
+        if (it.downloadUrl) {
+            installBtn.href = it.downloadUrl.replace(/share-ipa\.vunt\.info/g, window.location.host);
+        } else if (looksLikePlist) {
+            const token = it.fileAccessToken;
+            let manifestUrl = `${window.location.origin}/uploads/${buildId}`;
+            if (token) manifestUrl += `${manifestUrl.includes('?') ? '&' : '?'}k=${encodeURIComponent(token)}`;
             installBtn.href = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
         } else if (looksLikeApk) {
-            installBtn.href = `${window.location.origin}/uploads/${buildId}`;
+            const token = it.fileAccessToken;
+            let apkUrl = `${window.location.origin}/uploads/${buildId}`;
+            if (token) apkUrl += `${apkUrl.includes('?') ? '&' : '?'}k=${encodeURIComponent(token)}`;
+            installBtn.href = apkUrl;
         } else {
             installBtn.href = '#';
         }
 
-        if (res.ok && data.success && data.item) {
-            const it = data.item;
-            platform = it.platform || platform || 'ios';
-            const defaultName = platform === 'android' ? 'Ứng dụng Android' : 'Ứng dụng iOS';
-
-            installName.innerText = it.appName || defaultName;
-            installBundle.innerText = it.bundleId || '';
-            installVersion.innerText = `Phiên bản ${it.version} • Build ${it.buildNumber}`;
-            installVersion.style.display = 'inline-block';
-            if (it.icon) installIcon.src = it.icon;
-
-            if (window.LanTransfer) {
-                await window.LanTransfer.applyDownloadHref(installBtn, it);
-                const lanBase = await window.LanTransfer.getLanBase();
-                if (lanBase && it.localFileAvailable) {
-                    lanHintShown = true;
-                    installHint.dataset.lan = '1';
-                }
-            } else if (it.downloadUrl) {
-                installBtn.href = it.downloadUrl.replace(/share-ipa\.vunt\.info/g, window.location.host);
+        if (window.LanTransfer) {
+            await window.LanTransfer.applyDownloadHref(installBtn, it);
+            const lanBase = await window.LanTransfer.getLanBase();
+            if (lanBase && it.localFileAvailable) {
+                lanHintShown = true;
+                installHint.dataset.lan = '1';
             }
+        }
 
-            const parts = [];
-            if (it.fileSize) parts.push(`📦 ${it.fileSize}`);
-            if (it.uploadedAt) parts.push(`🕒 ${formatDateTime(it.uploadedAt)}`);
-            installExtra.innerText = parts.join('  •  ');
+        const parts = [];
+        if (it.fileSize) parts.push(`📦 ${it.fileSize}`);
+        if (it.uploadedAt) parts.push(`🕒 ${formatDateTime(it.uploadedAt)}`);
+        installExtra.innerText = parts.join('  •  ');
 
-            const tags = [];
-            if (platform === 'android') {
-                tags.push('<span class="build-tag build-tag-android">Android</span>');
-                if (it.minimumOsVersion) {
-                    tags.push(`<span class="build-tag build-tag-android">API ${it.minimumOsVersion}+</span>`);
-                }
-            } else {
-                tags.push('<span class="build-tag build-tag-ios">iOS</span>');
-                if (it.minimumOsVersion) {
-                    tags.push(`<span class="build-tag build-tag-ios">iOS ${it.minimumOsVersion}+</span>`);
-                }
-                if (it.profileType) {
-                    tags.push(`<span class="build-tag build-tag-profile">${it.profileType}</span>`);
-                }
-                if (it.provisionedDevicesCount != null) {
-                    tags.push(`<span class="build-tag build-tag-devices">${it.provisionedDevicesCount} thiết bị</span>`);
-                }
-            }
-
-            if (tags.length) {
-                const tagsEl = document.createElement('div');
-                tagsEl.className = 'build-tags install-tags';
-                tagsEl.innerHTML = tags.join('');
-                installExtra.insertAdjacentElement('afterend', tagsEl);
-
-                const devices = Array.isArray(it.provisionedDevices) ? it.provisionedDevices : [];
-                if (platform === 'ios' && devices.length) {
-                    const rows = devices.map((udid, i) =>
-                        `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid" title="${udid}">${maskUdid(udid)}</code></div>`
-                    ).join('');
-                    const detailsEl = document.createElement('details');
-                    detailsEl.className = 'devices-details install-devices';
-                    detailsEl.innerHTML = `
-                        <summary class="devices-summary">
-                            <svg class="devices-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-                            Xem ${devices.length} thiết bị đã được thêm
-                        </summary>
-                        <div class="devices-list">${rows}</div>`;
-                    tagsEl.insertAdjacentElement('afterend', detailsEl);
-                }
+        const tags = [];
+        if (platform === 'android') {
+            tags.push('<span class="build-tag build-tag-android">Android</span>');
+            if (it.minimumOsVersion) {
+                tags.push(`<span class="build-tag build-tag-android">API ${it.minimumOsVersion}+</span>`);
             }
         } else {
-            installName.innerText = 'Không tìm thấy thông tin bản build';
-            installBundle.innerText = data.message || 'Bản build có thể đã bị xoá khỏi danh mục.';
-            installVersion.style.display = 'none';
+            tags.push('<span class="build-tag build-tag-ios">iOS</span>');
+            if (it.minimumOsVersion) {
+                tags.push(`<span class="build-tag build-tag-ios">iOS ${it.minimumOsVersion}+</span>`);
+            }
+            if (it.profileType) {
+                tags.push(`<span class="build-tag build-tag-profile">${it.profileType}</span>`);
+            }
+            if (it.provisionedDevicesCount != null) {
+                tags.push(`<span class="build-tag build-tag-devices">${it.provisionedDevicesCount} thiết bị</span>`);
+            }
+        }
+
+        if (tags.length) {
+            const tagsEl = document.createElement('div');
+            tagsEl.className = 'build-tags install-tags';
+            tagsEl.innerHTML = tags.join('');
+            installExtra.insertAdjacentElement('afterend', tagsEl);
+
+            const devices = Array.isArray(it.provisionedDevices) ? it.provisionedDevices : [];
+            if (platform === 'ios' && devices.length) {
+                const rows = devices.map((udid, i) =>
+                    `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid" title="${udid}">${maskUdid(udid)}</code></div>`
+                ).join('');
+                const detailsEl = document.createElement('details');
+                detailsEl.className = 'devices-details install-devices';
+                detailsEl.innerHTML = `
+                    <summary class="devices-summary">
+                        <svg class="devices-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                        Xem ${devices.length} thiết bị đã được thêm
+                    </summary>
+                    <div class="devices-list">${rows}</div>`;
+                tagsEl.insertAdjacentElement('afterend', detailsEl);
+            }
         }
     } catch (err) {
         installName.innerText = 'Cài đặt ứng dụng';

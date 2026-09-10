@@ -208,7 +208,7 @@ async function loadAppDetail() {
         );
         const data = await res.json().catch(() => ({}));
         if (data.vpnRequired && !res.ok && detailView.showVpnGate) {
-            detailView.showVpnGate(data.vpn, data.message);
+            detailView.showVpnGate({ needLogin: data.needLogin, message: data.message });
             return;
         }
         if (!res.ok || !data.success) {
@@ -235,9 +235,6 @@ async function loadAppDetail() {
 }
 
 async function init() {
-    if (window.VpnGate && window.VpnGate.ready) {
-        await window.VpnGate.ready;
-    }
     try {
         const authRes = await fetch('/api/auth-status');
         const authData = await authRes.json().catch(() => ({}));

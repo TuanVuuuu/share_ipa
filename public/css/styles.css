@@ -607,6 +607,21 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     color: #4b5563;
     text-align: center;
 }
+.vpn-gate-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin-top: 16px;
+}
+.vpn-gate .vpn-lan-btn,
+.vpn-gate .btn.secondary {
+    display: inline-flex;
+    justify-content: center;
+    margin-top: 0;
+    text-decoration: none;
+    width: 100%;
+}
 .modal-card.is-denied {
     gap: 0;
 }
@@ -648,11 +663,6 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 .vpn-gate .vpn-copy {
     padding: 6px 10px;
     font-size: 12px;
-}
-.vpn-gate .vpn-lan-btn {
-    display: inline-flex;
-    margin-top: 16px;
-    text-decoration: none;
 }
 .catalog-sub {
     margin: 6px 0 18px;

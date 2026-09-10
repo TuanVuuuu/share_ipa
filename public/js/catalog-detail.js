@@ -345,14 +345,16 @@
             renderBuilds(builds);
         }
 
-        function showVpnGate() {
+        function showVpnGate(info) {
             stopLoading();
             detailPageSub.innerText = '';
             detailHeader.style.display = 'none';
             detailBuilds.innerHTML = '';
             detailEmpty.style.display = 'none';
             if (detailShareBtn) detailShareBtn.style.display = 'none';
-            if (detailVpnGate && window.VpnGate) window.VpnGate.mount(detailVpnGate);
+            if (detailVpnGate && window.VpnGate) {
+                window.VpnGate.mount(detailVpnGate);
+            }
             syncAdminActions(null);
         }
 
