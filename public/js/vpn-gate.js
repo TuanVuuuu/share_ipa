@@ -13,11 +13,18 @@
         if (!container) return;
         container.innerHTML = '';
         container.appendChild(render());
+        const inModal = !!container.closest('.modal-card');
+        container.classList.toggle('is-open', !inModal);
+        container.classList.toggle('is-embedded', inModal);
         container.style.display = '';
+        if (inModal) container.closest('.modal-card').classList.add('is-denied');
     }
 
     function hide(container) {
         if (!container) return;
+        const modal = container.closest('.modal-card');
+        if (modal) modal.classList.remove('is-denied');
+        container.classList.remove('is-open', 'is-embedded');
         container.innerHTML = '';
         container.style.display = 'none';
     }

@@ -133,10 +133,13 @@
 
         function openQrModal(item) {
             const vpnBlocked = !!(currentGroup && currentGroup.vpnRequired && !currentGroup.vpnAccess);
-            qrModalTitle.innerText = item.appName || 'Ứng dụng';
-            qrModalVersion.innerText = `${item.bundleId || ''} • v${item.version} (Build ${item.buildNumber})`;
-            qrModalUrl.value = item.shareUrl || '';
-            qrModalInstall.href = vpnBlocked ? (item.shareUrl || '#') : (item.downloadUrl || '#');
+            const urlBox = qrModal.querySelector('.url-box');
+            qrModalTitle.innerText = vpnBlocked ? '' : (item.appName || 'Ứng dụng');
+            qrModalVersion.innerText = vpnBlocked
+                ? ''
+                : `${item.bundleId || ''} • v${item.version} (Build ${item.buildNumber})`;
+            qrModalUrl.value = vpnBlocked ? '' : (item.shareUrl || '');
+            qrModalInstall.href = vpnBlocked ? '#' : (item.downloadUrl || '#');
             if (!vpnBlocked && window.LanTransfer) {
                 window.LanTransfer.applyDownloadHref(qrModalInstall, item);
             }
@@ -146,29 +149,30 @@
                     if (qrModalImage) qrModalImage.style.display = 'none';
                     if (qrModalScanHint) qrModalScanHint.style.display = 'none';
                     if (qrModalInstall) qrModalInstall.style.display = 'none';
+                    if (urlBox) urlBox.style.display = 'none';
                 } else {
                     if (window.VpnGate) window.VpnGate.hide(qrModalVpn);
                     if (qrModalImage) qrModalImage.style.display = '';
                     if (qrModalScanHint) qrModalScanHint.style.display = '';
                     if (qrModalInstall) qrModalInstall.style.display = '';
+                    if (urlBox) urlBox.style.display = '';
                 }
             }
 
-            // Cập nhật thẻ thông tin bổ sung trong modal
             qrModal.querySelectorAll('.qr-modal-meta, .devices-details').forEach(el => el.remove());
-            const metaTags = buildBuildMetaTags(item);
-            if (metaTags) {
-                const metaEl = document.createElement('div');
-                metaEl.className = 'qr-modal-meta';
-                metaEl.innerHTML = metaTags;
-                qrModalVersion.insertAdjacentElement('afterend', metaEl);
-            }
-
-            // Block expand/collapse thiết bị (chèn sau metaTags hoặc sau version)
-            const devicesHtml = buildDevicesBlock(item, 'qr-modal-devices');
-            if (devicesHtml) {
-                const anchor = qrModal.querySelector('.qr-modal-meta') || qrModalVersion;
-                anchor.insertAdjacentHTML('afterend', devicesHtml);
+            if (!vpnBlocked) {
+                const metaTags = buildBuildMetaTags(item);
+                if (metaTags) {
+                    const metaEl = document.createElement('div');
+                    metaEl.className = 'qr-modal-meta';
+                    metaEl.innerHTML = metaTags;
+                    qrModalVersion.insertAdjacentElement('afterend', metaEl);
+                }
+                const devicesHtml = buildDevicesBlock(item, 'qr-modal-devices');
+                if (devicesHtml) {
+                    const anchor = qrModal.querySelector('.qr-modal-meta') || qrModalVersion;
+                    anchor.insertAdjacentHTML('afterend', devicesHtml);
+                }
             }
 
             qrModalImage.innerHTML = '';
@@ -297,7 +301,7 @@
                     </div>
                     <div class="build-actions">
                         <button type="button" class="btn secondary qr-btn">Xem QR</button>
-                        <a class="btn install-mini" href="${escapeHtml((vpnBlocked && build.shareUrl) || build.downloadUrl || '#')}">Cài đặt</a>
+                        ${vpnBlocked ? '' : `<a class="btn install-mini" href="${escapeHtml(build.downloadUrl || '#')}">Cài đặt</a>`}
                         ${showDelete ? '<button type="button" class="btn danger delete-build-btn">Xóa</button>' : ''}
                     </div>
                 `;

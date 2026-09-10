@@ -566,21 +566,58 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 .vpn-gate-wrap {
     margin: 12px 0 8px;
 }
+.vpn-gate-wrap.is-open {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.45);
+}
+.vpn-gate-wrap.is-embedded {
+    width: 100%;
+    margin: 0;
+}
 .vpn-gate {
-    text-align: left;
-    background: #f5f8ff;
-    border: 1px solid #dbe7ff;
-    border-radius: 14px;
-    padding: 16px;
+    text-align: center;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 28px 24px;
+    max-width: 360px;
+    width: 100%;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+.vpn-gate-wrap.is-embedded .vpn-gate {
+    box-shadow: none;
+    border: 0;
+    padding: 12px 8px 8px;
 }
 .vpn-gate h3 {
     margin: 0 0 8px;
     font-size: 18px;
+    text-align: center;
 }
 .vpn-gate p {
-    margin: 0 0 12px;
+    margin: 0;
     font-size: 14px;
     color: #4b5563;
+    text-align: center;
+}
+.modal-card.is-denied {
+    gap: 0;
+}
+.modal-card.is-denied > h3,
+.modal-card.is-denied > .qr-hint,
+.modal-card.is-denied > .qr-code,
+.modal-card.is-denied > .url-box,
+.modal-card.is-denied > .btn,
+.modal-card.is-denied > .qr-modal-meta,
+.modal-card.is-denied > .devices-details {
+    display: none !important;
 }
 .vpn-cred {
     display: flex;

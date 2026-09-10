@@ -180,6 +180,8 @@ function showVpnGate() {
     dlError.style.display = 'none';
     tabIos.style.display = 'none';
     tabAndroid.style.display = 'none';
+    const top = document.getElementById('dl-top');
+    if (top) top.style.display = 'none';
     setCategoryTitle('');
     setCategoryIcon('');
     const gate = document.getElementById('vpn-gate-root');

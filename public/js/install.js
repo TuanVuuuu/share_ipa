@@ -72,6 +72,9 @@ async function init() {
             if (content) content.style.display = 'none';
             if (installBtn) installBtn.style.display = 'none';
             if (installHint) installHint.style.display = 'none';
+            if (installBack) installBack.style.display = 'none';
+            const brand = document.querySelector('.install-brand');
+            if (brand) brand.style.display = 'none';
             const gate = document.getElementById('vpn-gate-root');
             if (gate && window.VpnGate) window.VpnGate.mount(gate);
             return;
