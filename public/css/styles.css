@@ -523,7 +523,8 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     font-size: 11px;
     vertical-align: middle;
 }
-.app-card-info .detail-hidden-badge {
+.app-card-info .detail-hidden-badge,
+.dl-app-card-info .detail-hidden-badge {
     margin: 2px 0 4px;
     margin-left: 0;
 }
@@ -1289,6 +1290,11 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     align-items: center;
     gap: 14px;
     margin: 8px 0 20px;
+    flex-wrap: wrap;
+}
+.dl-pick-header-info {
+    min-width: 0;
+    flex: 1;
 }
 .dl-pick-header h2 {
     text-align: left;
@@ -1683,9 +1689,14 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     flex-direction: column;
     gap: 8px;
 }
+.dl-app-card-wrap.is-hidden,
+.dl-app-card.is-hidden {
+    opacity: 0.72;
+}
 .dl-product-actions {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
     padding: 0 4px 4px;
 }
 .dl-product-actions .btn {
@@ -1707,8 +1718,11 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     padding-top: 18px;
     border-top: 1px solid #ececef;
 }
+.dl-saved-section .catalog-head {
+    margin-bottom: 12px;
+}
 .dl-saved-section h3 {
-    margin: 0 0 12px;
+    margin: 0;
     font-size: 16px;
 }
 .dl-saved-list {

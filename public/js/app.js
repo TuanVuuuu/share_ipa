@@ -489,7 +489,7 @@ async function loadDownloadProductsHome() {
         for (const product of items) {
             const card = document.createElement('button');
             card.type = 'button';
-            card.className = 'dl-app-card';
+            card.className = 'dl-app-card' + (product.hidden ? ' is-hidden' : '');
             const iconMarkup = product.icon
                 ? `<img src="${escapeHtml(product.icon)}" alt="" class="dl-app-card-icon">`
                 : `<div class="dl-app-card-icon dl-app-card-icon-text">${escapeHtml((product.name || '?').slice(0, 1).toUpperCase())}</div>`;
@@ -497,6 +497,7 @@ async function loadDownloadProductsHome() {
                 ${iconMarkup}
                 <div class="dl-app-card-info">
                     <h4>${escapeHtml(product.name)}</h4>
+                    ${product.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
                     <p>${product.iosBundleId ? 'iOS' : '—'}${product.androidBundleId ? ' · Android' : ''}</p>
                 </div>
                 <span class="dl-app-card-arrow">›</span>

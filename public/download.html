@@ -96,9 +96,16 @@
         <div class="dl-pick-content" id="pick-content">
             <div class="dl-pick-header">
                 <img src="" alt="" class="dl-pick-icon" id="pick-icon">
-                <div>
-                    <h2 id="pick-name">App</h2>
+                <div class="dl-pick-header-info">
+                    <h2>
+                        <span id="pick-name">App</span>
+                        <span class="detail-hidden-badge" id="pick-hidden-badge" style="display:none;">Đã ẩn</span>
+                    </h2>
                     <p class="catalog-sub" id="pick-sub">Chọn bản build để chia sẻ</p>
+                </div>
+                <div class="detail-head-actions" id="pick-admin-actions" style="display:none;">
+                    <button type="button" class="btn secondary" id="pick-visibility-btn">Ẩn</button>
+                    <button type="button" class="btn danger" id="pick-delete-product-btn">Xóa thể loại</button>
                 </div>
             </div>
 
@@ -127,7 +134,10 @@
             </div>
 
             <div class="dl-saved-section">
-                <h3>Link đã lưu</h3>
+                <div class="catalog-head">
+                    <h3>Link đã lưu</h3>
+                    <button type="button" class="btn danger" id="pick-delete-all-shares-btn" style="display:none;">Xóa tất cả link đã lưu</button>
+                </div>
                 <div id="saved-shares-skeleton" class="dl-saved-skeleton" aria-hidden="true">
                     <div class="sk sk-dl-pick-saved-card"></div>
                     <div class="sk sk-dl-pick-saved-card"></div>

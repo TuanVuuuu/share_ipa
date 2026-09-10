@@ -24,6 +24,11 @@ const savedSharesSkeleton = document.getElementById('saved-shares-skeleton');
 const savedSection = document.querySelector('.dl-saved-section');
 const pickContent = document.getElementById('pick-content');
 const pickSkeleton = document.getElementById('pick-skeleton');
+const pickHiddenBadge = document.getElementById('pick-hidden-badge');
+const pickAdminActions = document.getElementById('pick-admin-actions');
+const pickVisibilityBtn = document.getElementById('pick-visibility-btn');
+const pickDeleteProductBtn = document.getElementById('pick-delete-product-btn');
+const pickDeleteAllSharesBtn = document.getElementById('pick-delete-all-shares-btn');
 
 const adminForm = document.getElementById('admin-product-form');
 const adminFormTitle = document.getElementById('admin-form-title');
@@ -70,6 +75,31 @@ function formatDateTime(iso) {
 
 function canManageProducts() {
     return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('manage_download_products'));
+}
+
+function isAdmin() {
+    return !!(currentUser && currentUser.role === 'admin');
+}
+
+function syncPickAdminActions(product) {
+    const canManage = isAdmin() && !!product;
+    if (pickAdminActions) pickAdminActions.style.display = canManage ? '' : 'none';
+    if (pickHiddenBadge) pickHiddenBadge.style.display = product && product.hidden ? 'inline-block' : 'none';
+    if (pickVisibilityBtn) {
+        pickVisibilityBtn.textContent = product && product.hidden ? 'Hiện' : 'Ẩn';
+        pickVisibilityBtn.disabled = false;
+    }
+    if (pickDeleteProductBtn) pickDeleteProductBtn.disabled = false;
+    if (pickDeleteAllSharesBtn) {
+        pickDeleteAllSharesBtn.style.display = canManage ? '' : 'none';
+        pickDeleteAllSharesBtn.disabled = false;
+    }
+}
+
+function setPickAdminBusy(busy) {
+    if (pickVisibilityBtn) pickVisibilityBtn.disabled = !!busy;
+    if (pickDeleteProductBtn) pickDeleteProductBtn.disabled = !!busy;
+    if (pickDeleteAllSharesBtn) pickDeleteAllSharesBtn.disabled = !!busy;
 }
 
 function setPreviewImage(imgEl, src, fallbackAlt) {
@@ -248,7 +278,7 @@ function renderProductList() {
 
     for (const product of products) {
         const card = document.createElement('div');
-        card.className = 'dl-app-card-wrap';
+        card.className = 'dl-app-card-wrap' + (product.hidden ? ' is-hidden' : '');
         const mainBtn = document.createElement('button');
         mainBtn.type = 'button';
         mainBtn.className = 'dl-app-card';
@@ -259,6 +289,7 @@ function renderProductList() {
             ${iconMarkup}
             <div class="dl-app-card-info">
                 <h4>${escapeHtml(product.name)}</h4>
+                ${product.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
                 <p>${product.iosBundleId ? 'iOS' : '—'}${product.androidBundleId ? ' · Android' : ''}</p>
             </div>
             <span class="dl-app-card-arrow">›</span>
@@ -279,21 +310,30 @@ function renderProductList() {
                 e.stopPropagation();
                 startEditProduct(product);
             });
+            const hideBtn = document.createElement('button');
+            hideBtn.type = 'button';
+            hideBtn.className = 'btn secondary';
+            hideBtn.textContent = product.hidden ? 'Hiện' : 'Ẩn';
+            hideBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
+                    const updated = await toggleProductVisibility(product);
+                    if (!updated) return;
+                    products = products.map(p => p.id === updated.id ? updated : p);
+                    renderProductList();
+                } catch (err) {
+                    alert(err.message);
+                }
+            });
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.className = 'btn secondary';
             delBtn.textContent = 'Xóa';
             delBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                if (!confirm(`Xóa mục "${product.name}"? Các link đã lưu của mục này cũng sẽ bị xóa.`)) return;
                 try {
-                    const res = await fetch('/api/download-products/delete', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id: product.id }),
-                    });
-                    const data = await res.json();
-                    if (!res.ok || !data.success) throw new Error(data.message || 'Xóa thất bại.');
+                    const ok = await deleteProduct(product);
+                    if (!ok) return;
                     products = products.filter(p => p.id !== product.id);
                     renderProductList();
                 } catch (err) {
@@ -301,12 +341,80 @@ function renderProductList() {
                 }
             });
             actions.appendChild(editBtn);
+            actions.appendChild(hideBtn);
             actions.appendChild(delBtn);
             card.appendChild(actions);
         }
 
         appList.appendChild(card);
     }
+}
+
+async function toggleProductVisibility(product) {
+    if (!isAdmin() || !product) return null;
+    const nextHidden = !product.hidden;
+    const confirmed = confirm(
+        nextHidden
+            ? `Ẩn thể loại "${product.name}" khỏi danh sách?\nChỉ tài khoản admin còn nhìn thấy mục này.`
+            : `Hiện lại thể loại "${product.name}" trong danh sách?`
+    );
+    if (!confirmed) return null;
+
+    const res = await fetch('/api/download-products/visibility', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: product.id, hidden: nextHidden }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.success) {
+        throw new Error((data && data.message) || 'Cập nhật ẩn/hiện thất bại.');
+    }
+    return data.item;
+}
+
+async function deleteProduct(product) {
+    if (!isAdmin() || !product) return false;
+    const confirmed = confirm(
+        `Xóa thể loại "${product.name}"?\n\n` +
+        `Sẽ xóa toàn bộ thông tin mục này trên GitHub, icon/banner trên máy chủ và mọi link đã lưu.\n` +
+        `Hành động này KHÔNG THỂ hoàn tác.`
+    );
+    if (!confirmed) return false;
+    const confirmedAgain = confirm('Xác nhận lần nữa: xóa vĩnh viễn thể loại này?');
+    if (!confirmedAgain) return false;
+
+    const res = await fetch('/api/download-products/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: product.id }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.success) {
+        throw new Error((data && data.message) || 'Xóa thể loại thất bại.');
+    }
+    return true;
+}
+
+async function deleteAllSavedShares(product) {
+    if (!isAdmin() || !product) return false;
+    const confirmed = confirm(
+        `Xóa TẤT CẢ link đã lưu của "${product.name}"?\n\n` +
+        `Toàn bộ link đã lưu trên GitHub sẽ bị xóa. Hành động này KHÔNG THỂ hoàn tác.`
+    );
+    if (!confirmed) return false;
+    const confirmedAgain = confirm('Xác nhận lần nữa: xóa toàn bộ link đã lưu?');
+    if (!confirmedAgain) return false;
+
+    const res = await fetch('/api/download-shares/delete-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: product.id }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.success) {
+        throw new Error((data && data.message) || 'Xóa tất cả link đã lưu thất bại.');
+    }
+    return true;
 }
 
 async function loadSavedShares(productId) {
@@ -413,6 +521,7 @@ async function showPick(productId) {
             currentProduct.iosBundleId || null,
             currentProduct.androidBundleId || null,
         ].filter(Boolean).join(' · ');
+        syncPickAdminActions(currentProduct);
 
         fillSelect(iosSelect, data.ios || [], iosHint, currentProduct.iosBundleId ? 'Chưa có bản iOS trong catalog' : 'Chưa cấu hình bundle iOS');
         fillSelect(androidSelect, data.android || [], androidHint, currentProduct.androidBundleId ? 'Chưa có bản Android trong catalog' : 'Chưa cấu hình package Android');
@@ -593,6 +702,62 @@ toggleCreateBtn.addEventListener('click', () => {
 productSaveBtn.addEventListener('click', saveProduct);
 productCancelBtn.addEventListener('click', resetAdminForm);
 saveShareBtn.addEventListener('click', saveShare);
+
+if (pickVisibilityBtn) {
+    pickVisibilityBtn.addEventListener('click', async () => {
+        if (!currentProduct) return;
+        setPickAdminBusy(true);
+        try {
+            const updated = await toggleProductVisibility(currentProduct);
+            if (!updated) {
+                setPickAdminBusy(false);
+                return;
+            }
+            currentProduct = updated;
+            syncPickAdminActions(currentProduct);
+        } catch (err) {
+            alert(err.message);
+            setPickAdminBusy(false);
+        }
+    });
+}
+
+if (pickDeleteProductBtn) {
+    pickDeleteProductBtn.addEventListener('click', async () => {
+        if (!currentProduct) return;
+        setPickAdminBusy(true);
+        try {
+            const ok = await deleteProduct(currentProduct);
+            if (!ok) {
+                setPickAdminBusy(false);
+                return;
+            }
+            window.location.href = '/download';
+        } catch (err) {
+            alert(err.message);
+            setPickAdminBusy(false);
+        }
+    });
+}
+
+if (pickDeleteAllSharesBtn) {
+    pickDeleteAllSharesBtn.addEventListener('click', async () => {
+        if (!currentProduct) return;
+        setPickAdminBusy(true);
+        try {
+            const ok = await deleteAllSavedShares(currentProduct);
+            if (!ok) {
+                setPickAdminBusy(false);
+                return;
+            }
+            await loadSavedShares(currentProduct.id);
+            syncPickAdminActions(currentProduct);
+        } catch (err) {
+            alert(err.message);
+            setPickAdminBusy(false);
+        }
+    });
+}
 
 productIconFileInput.addEventListener('change', async () => {
     const file = productIconFileInput.files && productIconFileInput.files[0];

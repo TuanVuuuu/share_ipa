@@ -27,7 +27,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-    const ASSET_VERSION = process.env.ASSET_VERSION || '39';
+    const ASSET_VERSION = process.env.ASSET_VERSION || '40';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -1243,7 +1243,41 @@ function publicProduct(p) {
         createdAt: p.createdAt || null,
         createdBy: p.createdBy || null,
         updatedAt: p.updatedAt || null,
+        hidden: !!p.hidden,
     });
+}
+
+function productsForUser(list, user) {
+    const mapped = (list || []).map(publicProduct);
+    if (isAdminUser(user)) return mapped;
+    return mapped.filter((item) => !item.hidden);
+}
+
+function deleteDownloadAssetFile(url) {
+    const raw = (url || '').toString();
+    const match = raw.match(/\/uploads\/download-assets\/([^/?#]+)/i);
+    if (!match) return;
+    const filename = decodeURIComponent(match[1]);
+    if (!filename || filename !== path.basename(filename)) return;
+    const filePath = path.join(UPLOADS_MAIN_DIR, 'download-assets', filename);
+    try {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (_) { /* bỏ qua file icon/banner không xóa được */ }
+}
+
+async function removeSharesForProduct(productId, commitMessage) {
+    const sharesFile = await loadJsonArrayFile(DOWNLOAD_SHARES_PATH);
+    const nextShares = sharesFile.list.filter((s) => s.productId !== productId);
+    const removedCount = sharesFile.list.length - nextShares.length;
+    if (removedCount > 0) {
+        await saveJsonArrayFile(
+            DOWNLOAD_SHARES_PATH,
+            nextShares,
+            commitMessage || `cleanup shares for product ${productId}`,
+            sharesFile.sha
+        );
+    }
+    return removedCount;
 }
 
 function publicShare(s) {
@@ -1524,7 +1558,7 @@ app.get('/api/download-products', requirePermission('create_download_link'), asy
     try {
         const list = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
         const sorted = [...list].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'vi'));
-        res.json({ success: true, items: sorted.map(publicProduct) });
+        res.json({ success: true, items: productsForUser(sorted, req.currentUser) });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được mục download: ${err.message}` });
     }
@@ -1634,18 +1668,14 @@ app.post('/api/download-products/delete', requirePermission('manage_download_pro
         if (idx === -1) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
         const [removed] = list.splice(idx, 1);
         await saveJsonArrayFile(DOWNLOAD_PRODUCTS_PATH, list, `delete download product ${removed.name}`, sha);
+        deleteDownloadAssetFile(removed.icon);
+        deleteDownloadAssetFile(removed.banner);
 
         try {
-            const sharesFile = await loadJsonArrayFile(DOWNLOAD_SHARES_PATH);
-            const nextShares = sharesFile.list.filter(s => s.productId !== id);
-            if (nextShares.length !== sharesFile.list.length) {
-                await saveJsonArrayFile(
-                    DOWNLOAD_SHARES_PATH,
-                    nextShares,
-                    `cleanup shares for deleted product ${removed.name}`,
-                    sharesFile.sha
-                );
-            }
+            await removeSharesForProduct(
+                id,
+                `cleanup shares for deleted product ${removed.name}`
+            );
         } catch (_) { /* không chặn xóa product */ }
 
         logToUI(`🗑️ ${req.currentUser.username} xóa mục download "${removed.name}"`, 'info');
@@ -1655,12 +1685,47 @@ app.post('/api/download-products/delete', requirePermission('manage_download_pro
     }
 });
 
+app.post('/api/download-products/visibility', requireAdmin, async (req, res) => {
+    try {
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể cập nhật.' });
+        }
+        const id = (req.body?.id || '').toString().trim();
+        const hidden = req.body?.hidden === true || req.body?.hidden === 'true';
+        if (!id) return res.status(400).json({ success: false, message: 'Thiếu id mục download.' });
+
+        const { list, sha } = await loadJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const idx = list.findIndex(item => item.id === id);
+        if (idx === -1) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+
+        list[idx] = {
+            ...list[idx],
+            hidden,
+            updatedAt: new Date().toISOString(),
+        };
+        const actor = req.currentUser.username;
+        await saveJsonArrayFile(
+            DOWNLOAD_PRODUCTS_PATH,
+            list,
+            `${hidden ? 'hide' : 'show'} download product ${list[idx].name} by ${actor}`,
+            sha
+        );
+        logToUI(`${hidden ? '🙈' : '👁️'} ${actor} đã ${hidden ? 'ẩn' : 'hiện'} mục download "${list[idx].name}"`, 'info');
+        return res.json({ success: true, item: publicProduct(list[idx]) });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: `Lỗi cập nhật ẩn/hiện mục download: ${err.message}` });
+    }
+});
+
 app.get('/api/download-products/:id/builds', requirePermission('create_download_link'), async (req, res) => {
     try {
         const id = (req.params.id || '').toString().trim();
         const products = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
         const product = products.find(item => item.id === id);
         if (!product) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+        if (product.hidden && !isAdminUser(req.currentUser)) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+        }
 
         const catalog = await readCatalog();
         const mapBuild = (item) => ({
@@ -1709,6 +1774,13 @@ app.get('/api/download-products/:id/builds', requirePermission('create_download_
 app.get('/api/download-shares', requirePermission('create_download_link'), async (req, res) => {
     try {
         const productId = (req.query.productId || '').toString().trim();
+        if (productId) {
+            const products = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+            const product = products.find(item => item.id === productId);
+            if (!product || (product.hidden && !isAdminUser(req.currentUser))) {
+                return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+            }
+        }
         let list = await readJsonArrayFile(DOWNLOAD_SHARES_PATH);
         if (productId) list = list.filter(item => item.productId === productId);
         list = [...list].sort((a, b) => (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0));
@@ -1734,6 +1806,9 @@ app.post('/api/download-shares', requirePermission('create_download_link'), asyn
         const products = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
         const product = products.find(item => item.id === productId);
         if (!product) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+        if (product.hidden && !isAdminUser(req.currentUser)) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+        }
 
         const catalog = await readCatalog();
         const iosBuild = iosBuildId ? catalog.find(item => item.id === iosBuildId) : null;
@@ -1802,6 +1877,29 @@ app.post('/api/download-shares/delete', requirePermission('create_download_link'
         return res.json({ success: true });
     } catch (err) {
         return res.status(500).json({ success: false, message: `Lỗi xóa link: ${err.message}` });
+    }
+});
+
+app.post('/api/download-shares/delete-all', requireAdmin, async (req, res) => {
+    try {
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể xóa link.' });
+        }
+        const productId = (req.body?.productId || '').toString().trim();
+        if (!productId) return res.status(400).json({ success: false, message: 'Thiếu productId.' });
+
+        const products = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const product = products.find(item => item.id === productId);
+        if (!product) return res.status(404).json({ success: false, message: 'Không tìm thấy mục download.' });
+
+        const removedCount = await removeSharesForProduct(
+            productId,
+            `delete all shares for ${product.name} by ${req.currentUser.username}`
+        );
+        logToUI(`🗑️ ${req.currentUser.username} đã xóa ${removedCount} link đã lưu của "${product.name}"`, 'info');
+        return res.json({ success: true, productId, removedCount });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: `Lỗi xóa tất cả link đã lưu: ${err.message}` });
     }
 });
 
