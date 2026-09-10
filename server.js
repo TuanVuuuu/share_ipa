@@ -37,7 +37,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '54';
+const ASSET_VERSION = process.env.ASSET_VERSION || '55';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -397,12 +397,9 @@ function hasVpnGrant(req) {
 }
 
 function hasVpnAccess(req) {
-    if (isLanRequest(req)) return true;
     if (hasVpnGrant(req)) return true;
-    if (isAdminUser(getSessionUser(req))) return true;
-    const ips = collectClientIps(req);
-    const allowed = [...VPN_ALLOWED_CIDRS, ...vpnPortalEgressIps];
-    return ips.some((ip) => allowed.some((cidr) => ipMatchesCidr(ip, cidr)));
+    if (isLanRequest(req)) return true;
+    return false;
 }
 
 function requestFileAccessToken(req) {
@@ -1330,7 +1327,7 @@ function patchAppVisibility(visibility, platform, bundleId, patch) {
 
 function stripVpnSecrets(item, req) {
     if (!item || !item.vpnRequired || hasVpnAccess(req)) return item;
-    return { ...item, downloadUrl: null, qr: null, fileAccessToken: null };
+    return { ...item, downloadUrl: null, qr: null, shareUrl: null, fileAccessToken: null };
 }
 
 function productNeedsVpn(product, visibility) {

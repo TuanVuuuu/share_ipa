@@ -124,7 +124,7 @@ async function handleToggleVpn(group, vpnRequired) {
         detailView.renderAppDetail(currentGroupFromBuilds(builds, {
             hidden: group.hidden,
             vpnRequired,
-            vpnAccess: group.vpnAccess,
+            vpnAccess: vpnRequired ? sessionVpnAccess : true,
             vpn: group.vpn,
         }));
     } catch (err) {

@@ -261,7 +261,11 @@ function showAppDetailPanel(group) {
     homeScrollY = window.scrollY;
     homeView.classList.add('spa-view-hidden');
     appDetailView.classList.remove('spa-view-hidden');
-    detailViewCtrl.renderAppDetail({ ...group, vpnAccess, vpn: group.vpn || vpnInfo });
+    detailViewCtrl.renderAppDetail({
+        ...group,
+        vpnAccess: group.vpnRequired ? vpnAccess : true,
+        vpn: group.vpn || vpnInfo,
+    });
     window.scrollTo(0, 0);
 }
 
@@ -424,7 +428,7 @@ async function handleToggleVpn(group, vpnRequired) {
                 builds,
                 hidden: group.hidden,
                 vpnRequired,
-                vpnAccess: group.vpnAccess,
+                vpnAccess: vpnRequired ? vpnAccess : true,
                 vpn: group.vpn || vpnInfo,
             });
         }
