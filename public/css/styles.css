@@ -495,10 +495,40 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+    flex-wrap: wrap;
 }
 .catalog-head h2 {
     text-align: left;
     margin: 0;
+}
+.detail-head-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+}
+.detail-head-actions .btn {
+    padding: 8px 12px;
+    font-size: 13px;
+}
+.detail-hidden-badge {
+    display: inline-block;
+    margin-left: 6px;
+    background: #fff4e5;
+    color: #b54708;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-weight: 600;
+    font-size: 11px;
+    vertical-align: middle;
+}
+.app-card-info .detail-hidden-badge {
+    margin: 2px 0 4px;
+    margin-left: 0;
+}
+.folder-card.is-hidden {
+    opacity: 0.72;
 }
 .catalog-sub {
     margin: 6px 0 18px;
@@ -740,7 +770,9 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 .app-detail-page.is-loading .detail-content { display: none; }
 .app-detail-page.is-loading .detail-skeleton { display: block; }
 .app-detail-page.is-loading .catalog-sub { visibility: hidden; }
-.app-detail-page.is-loading #detail-share-btn { visibility: hidden; }
+.app-detail-page.is-loading #detail-share-btn,
+.app-detail-page.is-loading #detail-visibility-btn,
+.app-detail-page.is-loading #detail-delete-all-btn { visibility: hidden; }
 
 .detail-content {
     animation: install-fade-in 0.3s ease;

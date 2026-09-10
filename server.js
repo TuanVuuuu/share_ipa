@@ -22,11 +22,12 @@ const CATALOG_IOS_PATH = 'catalog-ios.json';         // Danh mục riêng cho iO
 const CATALOG_ANDROID_PATH = 'catalog-android.json'; // Danh mục riêng cho Android
 const DOWNLOAD_PRODUCTS_PATH = 'download-products.json'; // Mục download do admin tạo (tên + bundle)
 const DOWNLOAD_SHARES_PATH = 'download-shares.json';     // Link do tester tạo và lưu
+const APP_VISIBILITY_PATH = 'app-visibility.json';       // Ẩn/hiện app theo platform + bundleId (admin)
 const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ lại trong mỗi danh mục
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '38';
+    const ASSET_VERSION = process.env.ASSET_VERSION || '39';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -354,6 +355,22 @@ function requirePermission(permission) {
         req.currentUser = user;
         next();
     };
+}
+
+function isAdminUser(user) {
+    return !!(user && user.role === 'admin');
+}
+
+function requireAdmin(req, res, next) {
+    const user = getSessionUser(req);
+    if (!user) {
+        return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập trước khi sử dụng.' });
+    }
+    if (!isAdminUser(user)) {
+        return res.status(403).json({ success: false, message: 'Chỉ tài khoản admin mới có quyền thực hiện hành động này.' });
+    }
+    req.currentUser = user;
+    next();
 }
 
 app.use(express.json({ limit: '5mb' }));
@@ -740,19 +757,22 @@ async function serveAppDetailPage(req, res, platform) {
     });
     if (bundleId) {
         try {
-            const list = await readCatalog();
-            const builds = list
-                .filter(item => (item.bundleId || item.id) === bundleId)
-                .filter(item => (item.platform || 'ios') === platform)
-                .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
-            if (builds.length > 0) {
-                const latest = builds[0];
-                og = buildOgMeta({
-                    title: `${latest.appName} (${platformLabel}) — Share IPA`,
-                    description: `${latest.appName} · ${bundleId} · Phiên bản mới nhất: ${latest.version} (build ${latest.buildNumber}) · ${builds.length} bản build`,
-                    image: latest.icon || undefined,
-                    url: appUrl,
-                });
+            const [list, visibility] = await Promise.all([readCatalog(), readAppVisibility()]);
+            const hidden = isAppHidden(visibility, platform, bundleId);
+            if (!hidden) {
+                const builds = list
+                    .filter(item => (item.bundleId || item.id) === bundleId)
+                    .filter(item => (item.platform || 'ios') === platform)
+                    .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
+                if (builds.length > 0) {
+                    const latest = builds[0];
+                    og = buildOgMeta({
+                        title: `${latest.appName} (${platformLabel}) — Share IPA`,
+                        description: `${latest.appName} · ${bundleId} · Phiên bản mới nhất: ${latest.version} (build ${latest.buildNumber}) · ${builds.length} bản build`,
+                        image: latest.icon || undefined,
+                        url: appUrl,
+                    });
+                }
             }
         } catch (_) { /* giữ OG mặc định nếu catalog lỗi */ }
     }
@@ -1024,6 +1044,164 @@ async function saveJsonArrayFile(filePath, list, message, sha) {
     await github.putFile(filePath, JSON.stringify(list, null, 2), message, sha);
 }
 
+async function loadJsonObjectFile(filePath) {
+    const file = await github.getFile(filePath);
+    let data = {};
+    let sha;
+    if (file) {
+        sha = file.sha;
+        try {
+            const parsed = JSON.parse(file.content);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed;
+        } catch (err) {
+            logToUI(`⚠️ ${filePath} không hợp lệ, sẽ khởi tạo lại. (${err.message})`, 'info');
+        }
+    }
+    return { data, sha };
+}
+
+async function saveJsonObjectFile(filePath, data, message, sha) {
+    await github.putFile(filePath, JSON.stringify(data, null, 2), message, sha);
+}
+
+function visibilityKey(platform, bundleId) {
+    const p = platform === 'android' ? 'android' : 'ios';
+    return `${p}:${bundleId}`;
+}
+
+function isAppHidden(visibility, platform, bundleId) {
+    if (!visibility || !bundleId) return false;
+    const entry = visibility[visibilityKey(platform, bundleId)];
+    if (entry === true) return true;
+    if (entry && typeof entry === 'object') return !!entry.hidden;
+    return false;
+}
+
+async function readAppVisibility() {
+    if (!github.isConfigured()) return {};
+    const { data } = await loadJsonObjectFile(APP_VISIBILITY_PATH);
+    return data;
+}
+
+function catalogItemsForUser(items, visibility, user) {
+    if (isAdminUser(user)) {
+        return items.map((item) => ({
+            ...item,
+            hidden: isAppHidden(visibility, item.platform || 'ios', item.bundleId || item.id),
+        }));
+    }
+    return items.filter((item) => !isAppHidden(visibility, item.platform || 'ios', item.bundleId || item.id));
+}
+
+function isSafeBundleId(bundleId) {
+    const value = (bundleId || '').toString().trim();
+    return !!value && !value.includes('/') && !value.includes('\\') && !value.includes('..');
+}
+
+async function deleteArchiveFoldersForBundle(bundleId) {
+    if (!isSafeBundleId(bundleId)) return 0;
+    let removed = 0;
+    try {
+        const entries = await fs.promises.readdir(ARCHIVE_STORAGE_DIR, { withFileTypes: true });
+        const suffix = `_${bundleId}`;
+        for (const ent of entries) {
+            if (!ent.isDirectory()) continue;
+            if (ent.name !== bundleId && !ent.name.endsWith(suffix)) continue;
+            await fs.promises.rm(path.join(ARCHIVE_STORAGE_DIR, ent.name), { recursive: true, force: true });
+            removed += 1;
+        }
+    } catch (err) {
+        logToUI(`⚠️ Lỗi khi xóa thư mục lưu trữ của ${bundleId}: ${err.message}`, 'info');
+    }
+    return removed;
+}
+
+async function cleanupGithubRefsForApp(bundleId, platform, removedIds) {
+    const isAndroid = platform === 'android';
+    const idSet = new Set((removedIds || []).filter(Boolean));
+    try {
+        const productsFile = await loadJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const removedProductIds = [];
+        const nextProducts = [];
+        let productsChanged = false;
+        for (const product of productsFile.list) {
+            const next = { ...product };
+            if (isAndroid && next.androidBundleId === bundleId) {
+                next.androidBundleId = '';
+                productsChanged = true;
+            }
+            if (!isAndroid && next.iosBundleId === bundleId) {
+                next.iosBundleId = '';
+                productsChanged = true;
+            }
+            if (!next.iosBundleId && !next.androidBundleId) {
+                removedProductIds.push(next.id);
+                productsChanged = true;
+                continue;
+            }
+            nextProducts.push(next);
+        }
+        if (productsChanged) {
+            await saveJsonArrayFile(
+                DOWNLOAD_PRODUCTS_PATH,
+                nextProducts,
+                `cleanup products after delete app ${bundleId}`,
+                productsFile.sha
+            );
+        }
+
+        const sharesFile = await loadJsonArrayFile(DOWNLOAD_SHARES_PATH);
+        const nextShares = [];
+        let sharesChanged = false;
+        for (const share of sharesFile.list) {
+            if (removedProductIds.includes(share.productId)) {
+                sharesChanged = true;
+                continue;
+            }
+            const next = { ...share };
+            if (idSet.has(next.iosBuildId)) {
+                next.iosBuildId = null;
+                next.iosVersion = null;
+                next.iosBuildNumber = null;
+                sharesChanged = true;
+            }
+            if (idSet.has(next.androidBuildId)) {
+                next.androidBuildId = null;
+                next.androidVersion = null;
+                next.androidBuildNumber = null;
+                sharesChanged = true;
+            }
+            if (!next.iosBuildId && !next.androidBuildId) {
+                sharesChanged = true;
+                continue;
+            }
+            nextShares.push(next);
+        }
+        if (sharesChanged) {
+            await saveJsonArrayFile(
+                DOWNLOAD_SHARES_PATH,
+                nextShares,
+                `cleanup shares after delete app ${bundleId}`,
+                sharesFile.sha
+            );
+        }
+    } catch (err) {
+        logToUI(`⚠️ Dọn dẹp product/share GitHub sau khi xóa app: ${err.message}`, 'info');
+    }
+
+    try {
+        const visFile = await loadJsonObjectFile(APP_VISIBILITY_PATH);
+        const key = visibilityKey(platform, bundleId);
+        if (visFile.data && Object.prototype.hasOwnProperty.call(visFile.data, key)) {
+            const next = { ...visFile.data };
+            delete next[key];
+            await saveJsonObjectFile(APP_VISIBILITY_PATH, next, `remove visibility for ${key}`, visFile.sha);
+        }
+    } catch (err) {
+        logToUI(`⚠️ Dọn cờ ẩn/hiện GitHub sau khi xóa app: ${err.message}`, 'info');
+    }
+}
+
 // Lưu data URL ảnh vào /uploads/download-assets, trả về URL public (tránh nhồi base64 vào GitHub JSON)
 function persistDownloadImage(dataUrlOrUrl, kind) {
     const raw = (dataUrlOrUrl || '').toString().trim();
@@ -1163,8 +1341,10 @@ async function appendToCatalog(record) {
 // /api/catalog/ios — chỉ trả iOS
 app.get('/api/catalog/ios', async (req, res) => {
     try {
-        const list = await readCatalog('ios');
-        res.json({ success: true, configured: github.isConfigured(), items: list.map(item => toClientBuild(item, req)) });
+        const user = getSessionUser(req);
+        const [list, visibility] = await Promise.all([readCatalog('ios'), readAppVisibility()]);
+        const items = catalogItemsForUser(list, visibility, user).map(item => toClientBuild(item, req));
+        res.json({ success: true, configured: github.isConfigured(), items });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh mục iOS: ${err.message}` });
     }
@@ -1173,8 +1353,10 @@ app.get('/api/catalog/ios', async (req, res) => {
 // /api/catalog/android — chỉ trả Android
 app.get('/api/catalog/android', async (req, res) => {
     try {
-        const list = await readCatalog('android');
-        res.json({ success: true, configured: github.isConfigured(), items: list.map(item => toClientBuild(item, req)) });
+        const user = getSessionUser(req);
+        const [list, visibility] = await Promise.all([readCatalog('android'), readAppVisibility()]);
+        const items = catalogItemsForUser(list, visibility, user).map(item => toClientBuild(item, req));
+        res.json({ success: true, configured: github.isConfigured(), items });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh mục Android: ${err.message}` });
     }
@@ -1183,8 +1365,10 @@ app.get('/api/catalog/android', async (req, res) => {
 // /api/catalog — gộp cả hai (backward compat)
 app.get('/api/catalog', async (req, res) => {
     try {
-        const list = await readCatalog();
-        res.json({ success: true, configured: github.isConfigured(), items: list.map(item => toClientBuild(item, req)) });
+        const user = getSessionUser(req);
+        const [list, visibility] = await Promise.all([readCatalog(), readAppVisibility()]);
+        const items = catalogItemsForUser(list, visibility, user).map(item => toClientBuild(item, req));
+        res.json({ success: true, configured: github.isConfigured(), items });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh mục: ${err.message}` });
     }
@@ -1237,6 +1421,101 @@ app.post('/api/catalog/delete', requirePermission('delete_build'), async (req, r
     } catch (err) {
         logToUI(`❌ Lỗi khi xóa bản build: ${err.message}`, 'error');
         return res.status(500).json({ success: false, message: `Lỗi khi xóa bản build: ${err.message}` });
+    }
+});
+
+// Ẩn/hiện một ứng dụng khỏi danh mục công khai. Chỉ admin.
+app.post('/api/catalog/visibility', requireAdmin, async (req, res) => {
+    try {
+        const bundleId = (req.body?.bundleId || '').toString().trim();
+        const platform = (req.body?.platform || '').toString().trim().toLowerCase() === 'android'
+            ? 'android'
+            : 'ios';
+        const hidden = req.body?.hidden === true || req.body?.hidden === 'true';
+        if (!isSafeBundleId(bundleId)) {
+            return res.status(400).json({ success: false, message: 'Thiếu bundleId hợp lệ.' });
+        }
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên không thể cập nhật.' });
+        }
+
+        const { data, sha } = await loadJsonObjectFile(APP_VISIBILITY_PATH);
+        const key = visibilityKey(platform, bundleId);
+        const next = { ...data };
+        if (hidden) next[key] = { hidden: true };
+        else delete next[key];
+
+        const actor = req.currentUser.username;
+        await saveJsonObjectFile(
+            APP_VISIBILITY_PATH,
+            next,
+            `${hidden ? 'hide' : 'show'} ${key} by ${actor}`,
+            sha
+        );
+
+        logToUI(`${hidden ? '🙈' : '👁️'} ${actor} đã ${hidden ? 'ẩn' : 'hiện'} ứng dụng ${bundleId} (${platform})`, 'info');
+        return res.json({ success: true, bundleId, platform, hidden });
+    } catch (err) {
+        logToUI(`❌ Lỗi khi cập nhật ẩn/hiện ứng dụng: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi khi cập nhật ẩn/hiện: ${err.message}` });
+    }
+});
+
+// Xóa toàn bộ bản build của một app: GitHub catalog + file máy chủ/R2 + product/share liên quan.
+app.post('/api/catalog/delete-app', requireAdmin, async (req, res) => {
+    try {
+        const bundleId = (req.body?.bundleId || '').toString().trim();
+        const platform = (req.body?.platform || '').toString().trim().toLowerCase() === 'android'
+            ? 'android'
+            : 'ios';
+        if (!isSafeBundleId(bundleId)) {
+            return res.status(400).json({ success: false, message: 'Thiếu bundleId hợp lệ.' });
+        }
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên không thể cập nhật danh mục.' });
+        }
+
+        const { list, sha } = await loadCatalogFile(platform);
+        const kept = [];
+        const removed = [];
+        for (const item of list) {
+            if ((item.bundleId || item.id) === bundleId) removed.push(item);
+            else kept.push(item);
+        }
+        if (!removed.length) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy ứng dụng này trong danh mục.' });
+        }
+
+        const actor = req.currentUser.username;
+        const appName = removed[0].appName || bundleId;
+        await github.putFile(
+            catalogPathForPlatform(platform),
+            JSON.stringify(kept, null, 2),
+            `delete all ${appName} (${bundleId}) by ${actor}`,
+            sha
+        );
+
+        for (const record of removed) {
+            await deletePhysicalBuildFiles(record);
+        }
+        const foldersRemoved = await deleteArchiveFoldersForBundle(bundleId);
+        await cleanupGithubRefsForApp(bundleId, platform, removed.map(item => item.id));
+
+        logToUI(
+            `🗑️ ${actor} đã xóa toàn bộ "${appName}" (${bundleId}, ${platform}): ${removed.length} bản build, ${foldersRemoved} thư mục lưu trữ`,
+            'info'
+        );
+
+        return res.json({
+            success: true,
+            bundleId,
+            platform,
+            removedCount: removed.length,
+            removedIds: removed.map(item => item.id),
+        });
+    } catch (err) {
+        logToUI(`❌ Lỗi khi xóa toàn bộ ứng dụng: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi khi xóa toàn bộ ứng dụng: ${err.message}` });
     }
 });
 
@@ -1607,13 +1886,22 @@ app.get('/api/app-builds', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Thiếu tham số bundle.' });
         }
 
-        const list = await readCatalog();
+        const user = getSessionUser(req);
+        const [list, visibility] = await Promise.all([readCatalog(), readAppVisibility()]);
+        const platformForVisibility = platformFilter === 'android' || platformFilter === 'ios'
+            ? platformFilter
+            : 'ios';
+        const hidden = isAppHidden(visibility, platformForVisibility, bundleId);
+        if (hidden && !isAdminUser(user)) {
+            return res.status(404).json({ success: false, message: `Không có bản build nào cho "${bundleId}".` });
+        }
+
         const builds = list
             .filter(item => (item.bundleId || item.id) === bundleId)
             .filter(item => !platformFilter || (item.platform || 'ios') === platformFilter)
             .map(item => {
                 const b = toClientBuild(item, req);
-                return {
+                const row = {
                     id: b.id,
                     appName: b.appName,
                     bundleId: b.bundleId,
@@ -1633,6 +1921,8 @@ app.get('/api/app-builds', async (req, res) => {
                     localFileAvailable: !!b.localFileAvailable,
                     uploadedBy: b.uploadedBy || null,
                 };
+                if (isAdminUser(user)) row.hidden = hidden;
+                return row;
             })
             .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
 
@@ -1640,7 +1930,9 @@ app.get('/api/app-builds', async (req, res) => {
             return res.status(404).json({ success: false, message: `Không có bản build nào cho "${bundleId}".` });
         }
 
-        return res.json({ success: true, bundleId, platform: platformFilter || null, builds });
+        const payload = { success: true, bundleId, platform: platformFilter || null, builds };
+        if (isAdminUser(user)) payload.hidden = hidden;
+        return res.json(payload);
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được danh sách build: ${err.message}` });
     }

@@ -64,8 +64,14 @@
             detailEmpty,
             detailAuth,
             detailShareBtn,
+            detailVisibilityBtn,
+            detailDeleteAllBtn,
+            detailHiddenBadge,
             canDeleteBuild,
+            canManageApp,
             onDeleteBuild,
+            onToggleVisibility,
+            onDeleteAll,
             qrModal,
             qrModalClose,
             qrModalTitle,
@@ -175,6 +181,44 @@
             detailShareBtn.addEventListener('click', () => copyText(window.location.href, detailShareBtn));
         }
 
+        let currentGroup = null;
+
+        function syncAdminActions(group) {
+            currentGroup = group || null;
+            const canManage = typeof canManageApp === 'function' && canManageApp();
+            const hidden = !!(group && group.hidden);
+            if (detailVisibilityBtn) {
+                detailVisibilityBtn.style.display = canManage && group ? 'inline-block' : 'none';
+                detailVisibilityBtn.textContent = hidden ? 'Hiện' : 'Ẩn';
+                detailVisibilityBtn.disabled = false;
+            }
+            if (detailDeleteAllBtn) {
+                detailDeleteAllBtn.style.display = canManage && group ? 'inline-block' : 'none';
+                detailDeleteAllBtn.disabled = false;
+            }
+            if (detailHiddenBadge) {
+                detailHiddenBadge.style.display = hidden ? 'inline-block' : 'none';
+            }
+        }
+
+        function setAdminBusy(busy) {
+            if (detailVisibilityBtn) detailVisibilityBtn.disabled = !!busy;
+            if (detailDeleteAllBtn) detailDeleteAllBtn.disabled = !!busy;
+        }
+
+        if (detailVisibilityBtn && typeof onToggleVisibility === 'function') {
+            detailVisibilityBtn.addEventListener('click', () => {
+                if (!currentGroup) return;
+                onToggleVisibility(currentGroup);
+            });
+        }
+        if (detailDeleteAllBtn && typeof onDeleteAll === 'function') {
+            detailDeleteAllBtn.addEventListener('click', () => {
+                if (!currentGroup) return;
+                onDeleteAll(currentGroup);
+            });
+        }
+
         function stopLoading() {
             appDetailZone.classList.remove('is-loading');
         }
@@ -188,6 +232,7 @@
             detailEmpty.style.display = 'none';
             if (detailAuth) detailAuth.style.display = 'none';
             if (detailShareBtn) detailShareBtn.style.display = 'none';
+            syncAdminActions(null);
         }
 
         function renderBuilds(builds) {
@@ -231,6 +276,8 @@
             const { latest, builds } = group;
             const platform = latest.platform || 'ios';
             const platformLabel = platform === 'android' ? 'Android' : 'iOS';
+            const hidden = !!(group.hidden || (latest && latest.hidden));
+            group.hidden = hidden;
 
             detailIcon.src = latest.icon || FALLBACK_ICON;
             detailIcon.onerror = () => { detailIcon.src = FALLBACK_ICON; };
@@ -244,6 +291,7 @@
 
             if (detailShareBtn) detailShareBtn.style.display = 'inline-block';
             detailHeader.style.display = 'flex';
+            syncAdminActions(group);
             renderBuilds(builds);
         }
 
@@ -251,12 +299,17 @@
             stopLoading();
             detailPageSub.style.display = 'none';
             if (detailAuth) detailAuth.style.display = 'block';
+            syncAdminActions(null);
         }
 
         function showEmpty(message) {
             stopLoading();
             detailPageSub.innerText = message;
+            detailHeader.style.display = 'none';
+            detailBuilds.innerHTML = '';
             detailEmpty.style.display = 'block';
+            if (detailShareBtn) detailShareBtn.style.display = 'none';
+            syncAdminActions(null);
         }
 
         return {
@@ -264,7 +317,8 @@
             renderAppDetail,
             showAuthRequired,
             showEmpty,
-            stopLoading
+            stopLoading,
+            setAdminBusy
         };
     }
 
@@ -283,6 +337,7 @@
             g.builds.sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
             g.latest = g.builds[0];
             g.count = g.builds.length;
+            g.hidden = g.builds.some((b) => b.hidden);
         });
         return groups.sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
     }
@@ -304,12 +359,13 @@
         const platformLabel = platform === 'android' ? 'Android' : 'iOS';
         const platformClass = platform === 'android' ? 'build-tag-android' : 'build-tag-ios';
         const card = document.createElement('div');
-        card.className = 'app-card folder-card';
+        card.className = 'app-card folder-card' + (group.hidden ? ' is-hidden' : '');
         card.innerHTML = `
             <div class="app-card-top">
                 <img src="${escapeHtml(latest.icon || FALLBACK_ICON)}" alt="icon" onerror="this.src='${FALLBACK_ICON}'">
                 <div class="app-card-info">
                     <h4>${escapeHtml(latest.appName)}</h4>
+                    ${group.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
                     <p class="app-card-bundle">${escapeHtml(latest.bundleId)}</p>
                 </div>
             </div>

@@ -184,7 +184,11 @@
 
         <div class="catalog-head">
             <h2 id="detail-page-title">Chi tiết ứng dụng</h2>
-            <button type="button" class="btn secondary" id="detail-share-btn" style="display:none;">Chia sẻ</button>
+            <div class="detail-head-actions">
+                <button type="button" class="btn secondary" id="detail-share-btn" style="display:none;">Chia sẻ</button>
+                <button type="button" class="btn secondary" id="detail-visibility-btn" style="display:none;">Ẩn</button>
+                <button type="button" class="btn danger" id="detail-delete-all-btn" style="display:none;">Xóa tất cả</button>
+            </div>
         </div>
         <p class="catalog-sub" id="detail-page-sub">Đang tải...</p>
 
@@ -192,7 +196,7 @@
             <div class="detail-header" id="detail-header" style="display:none;">
                 <img src="" alt="icon" class="detail-icon" id="detail-icon">
                 <div class="detail-header-info">
-                    <h3 id="detail-name"></h3>
+                    <h3><span id="detail-name"></span> <span class="detail-hidden-badge" id="detail-hidden-badge" style="display:none;">Đã ẩn</span></h3>
                     <p id="detail-bundle"></p>
                 </div>
             </div>

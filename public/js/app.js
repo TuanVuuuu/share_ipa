@@ -62,6 +62,10 @@ function canDeleteBuild() {
     return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('delete_build'));
 }
 
+function isAdmin() {
+    return !!(currentUser && currentUser.role === 'admin');
+}
+
 function canUploadBuild() {
     return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('upload_build'));
 }
@@ -221,8 +225,14 @@ if (homeView && appDetailView && window.CatalogDetail) {
         detailEmpty: document.getElementById('detail-empty'),
         detailAuth: document.getElementById('detail-auth'),
         detailShareBtn: document.getElementById('detail-share-btn'),
+        detailVisibilityBtn: document.getElementById('detail-visibility-btn'),
+        detailDeleteAllBtn: document.getElementById('detail-delete-all-btn'),
+        detailHiddenBadge: document.getElementById('detail-hidden-badge'),
         canDeleteBuild: canDeleteBuild,
+        canManageApp: isAdmin,
         onDeleteBuild: handleDeleteBuild,
+        onToggleVisibility: handleToggleVisibility,
+        onDeleteAll: handleDeleteAll,
         qrModal: document.getElementById('qr-modal'),
         qrModalClose: document.getElementById('qr-modal-close'),
         qrModalTitle: document.getElementById('qr-modal-title'),
@@ -331,6 +341,89 @@ async function handleDeleteBuild(build) {
         }
     } catch (err) {
         alert(err.message);
+    }
+}
+
+async function handleToggleVisibility(group) {
+    if (!isAdmin() || !group || !group.latest) return;
+    const bundleId = group.latest.bundleId;
+    const platform = group.latest.platform || 'ios';
+    const nextHidden = !group.hidden;
+    const confirmed = confirm(
+        nextHidden
+            ? `Ẩn "${group.latest.appName}" khỏi danh mục công khai?\nChỉ tài khoản admin còn nhìn thấy ứng dụng này.`
+            : `Hiện lại "${group.latest.appName}" trong danh mục?`
+    );
+    if (!confirmed) return;
+
+    if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(true);
+    try {
+        const res = await fetch('/api/catalog/visibility', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bundleId, platform, hidden: nextHidden })
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.success) {
+            throw new Error((data && data.message) || 'Cập nhật ẩn/hiện thất bại.');
+        }
+
+        catalogItems = catalogItems.map((item) => {
+            if ((item.bundleId || item.id) === bundleId && (item.platform || 'ios') === platform) {
+                return { ...item, hidden: nextHidden };
+            }
+            return item;
+        });
+        renderCatalog(true);
+
+        const builds = getBuildsForBundle(bundleId, platform);
+        if (builds.length && detailViewCtrl) {
+            detailViewCtrl.renderAppDetail({ latest: builds[0], builds, hidden: nextHidden });
+        }
+    } catch (err) {
+        alert(err.message);
+        if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(false);
+    }
+}
+
+async function handleDeleteAll(group) {
+    if (!isAdmin() || !group || !group.latest) return;
+    const bundleId = group.latest.bundleId;
+    const platform = group.latest.platform || 'ios';
+    const count = (group.builds && group.builds.length) || 0;
+    const confirmed = confirm(
+        `Xóa TẤT CẢ ${count} bản build của "${group.latest.appName}"?\n\n` +
+        `Sẽ xóa toàn bộ thông tin đã lưu trên GitHub và toàn bộ file bản build trên máy chủ.\n` +
+        `Hành động này KHÔNG THỂ hoàn tác.`
+    );
+    if (!confirmed) return;
+    const confirmedAgain = confirm('Xác nhận lần nữa: xóa vĩnh viễn toàn bộ dữ liệu ứng dụng này?');
+    if (!confirmedAgain) return;
+
+    if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(true);
+    try {
+        const res = await fetch('/api/catalog/delete-app', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bundleId, platform })
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.success) {
+            throw new Error((data && data.message) || 'Xóa toàn bộ ứng dụng thất bại.');
+        }
+
+        const removedIds = new Set(data.removedIds || []);
+        catalogItems = catalogItems.filter((item) => {
+            if ((item.bundleId || item.id) !== bundleId) return true;
+            if ((item.platform || 'ios') !== platform) return true;
+            return false;
+        }).filter((item) => !removedIds.has(item.id));
+        renderCatalog(true);
+        history.replaceState({ view: 'home' }, '', '/');
+        hideAppDetailPanel();
+    } catch (err) {
+        alert(err.message);
+        if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(false);
     }
 }
 
