@@ -40,6 +40,9 @@ function isIosUa() {
 }
 
 async function init() {
+    if (window.VpnGate && window.VpnGate.ready) {
+        await window.VpnGate.ready;
+    }
     const params = new URLSearchParams(window.location.search);
     const buildId = params.get('plist') || params.get('id') || '';
 

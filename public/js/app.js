@@ -667,6 +667,9 @@ function renderCatalog(configured) {
 catalogRefreshBtn.addEventListener('click', loadCatalog);
 
 async function checkAuthStatus() {
+    if (window.VpnGate && window.VpnGate.ready) {
+        await window.VpnGate.ready;
+    }
     try {
         const res = await fetch('/api/auth-status');
         const data = await res.json();

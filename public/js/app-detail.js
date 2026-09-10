@@ -235,6 +235,9 @@ async function loadAppDetail() {
 }
 
 async function init() {
+    if (window.VpnGate && window.VpnGate.ready) {
+        await window.VpnGate.ready;
+    }
     try {
         const authRes = await fetch('/api/auth-status');
         const authData = await authRes.json().catch(() => ({}));

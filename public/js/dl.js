@@ -208,6 +208,9 @@ async function fetchBuild(id) {
 }
 
 async function init() {
+    if (window.VpnGate && window.VpnGate.ready) {
+        await window.VpnGate.ready;
+    }
     const params = new URLSearchParams(window.location.search);
     const shareId = (params.get('s') || '').trim();
     let iosId = (params.get('ios') || '').trim();

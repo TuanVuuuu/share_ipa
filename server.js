@@ -9,6 +9,7 @@ require('dotenv').config({
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
+const crypto = require('crypto');
 const dns = require('dns').promises;
 const AppInfoParser = require('app-info-parser');
 const QRCode = require('qrcode');
@@ -36,7 +37,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '49';
+const ASSET_VERSION = process.env.ASSET_VERSION || '50';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -124,6 +125,9 @@ console.log('=========================');
 const app = express();
 const PORT = Number(process.env.PORT) || 3081;
 const AUTH_COOKIE_NAME = 'share_ipa_auth';
+const VPN_COOKIE_NAME = 'share_ipa_vpn';
+const VPN_TOKEN_SECRET = process.env.SESSION_SECRET || 'share-ipa-local-secret-change-me';
+const VPN_TUNNEL_CIDRS = ['172.20.0.0/16', '10.8.0.0/16', '172.27.0.0/16'];
 
 const { execFileSync } = require('child_process');
 
@@ -389,8 +393,41 @@ function collectClientIps(req) {
     return ips;
 }
 
+function isVpnTunnelIp(ip) {
+    return VPN_TUNNEL_CIDRS.some((cidr) => ipMatchesCidr(ip, cidr));
+}
+
+function createVpnToken() {
+    const payload = Buffer.from(JSON.stringify({ v: 1, exp: Date.now() + 12 * 60 * 60 * 1000 }), 'utf8').toString('base64url');
+    const sig = crypto.createHmac('sha256', VPN_TOKEN_SECRET).update(payload).digest('hex');
+    return `${payload}.${sig}`;
+}
+
+function verifyVpnToken(token) {
+    if (!token || typeof token !== 'string' || !token.includes('.')) return false;
+    const [payload, signature] = token.split('.');
+    if (!payload || !signature) return false;
+    const expected = crypto.createHmac('sha256', VPN_TOKEN_SECRET).update(payload).digest('hex');
+    const a = Buffer.from(signature);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+    try {
+        const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+        return !!(data && data.v === 1 && Number(data.exp) > Date.now());
+    } catch (_) {
+        return false;
+    }
+}
+
+function hasVpnGrantCookie(req) {
+    const cookies = parseCookies(req.headers.cookie || '');
+    return verifyVpnToken(cookies[VPN_COOKIE_NAME]);
+}
+
 function hasVpnAccess(req) {
     if (isLanRequest(req)) return true;
+    if (getSessionUser(req)) return true;
+    if (hasVpnGrantCookie(req)) return true;
     const ips = collectClientIps(req);
     const allowed = [...VPN_ALLOWED_CIDRS, ...vpnPortalEgressIps];
     return ips.some((ip) => allowed.some((cidr) => ipMatchesCidr(ip, cidr)));
@@ -948,7 +985,21 @@ app.get('/app', (req, res) => {
 app.get('/api/auth-status', (req, res) => {
     const user = getSessionUser(req);
     if (!user) return res.json({ authenticated: false, vpnAccess: hasVpnAccess(req) });
-    res.json({ authenticated: true, vpnAccess: hasVpnAccess(req), ...auth.toPublicUser(user) });
+    res.json({ authenticated: true, vpnAccess: true, ...auth.toPublicUser(user) });
+});
+
+app.post('/api/vpn-attest', (req, res) => {
+    const ips = Array.isArray(req.body?.ips) ? req.body.ips : [];
+    const ok = ips.some((ip) => isVpnTunnelIp(String(ip || '').trim()));
+    if (!ok) return res.json({ success: false, vpnAccess: hasVpnAccess(req) });
+    const token = createVpnToken();
+    const proto = (req.headers['x-forwarded-proto'] || req.protocol || '').toString().split(',')[0].trim();
+    const secure = proto === 'https';
+    res.setHeader(
+        'Set-Cookie',
+        `${VPN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200${secure ? '; Secure' : ''}`
+    );
+    return res.json({ success: true, vpnAccess: true });
 });
 
 // Đăng nhập bằng AJAX ngay trong trang chính
@@ -963,7 +1014,7 @@ app.post('/api/login', (req, res) => {
             `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
         );
 
-        return res.json({ success: true, vpnAccess: hasVpnAccess(req), ...auth.toPublicUser(user) });
+        return res.json({ success: true, vpnAccess: true, ...auth.toPublicUser(user) });
     }
 
     return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không đúng.' });
