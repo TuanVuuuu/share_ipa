@@ -1,4 +1,5 @@
 const FALLBACK_ICON = 'https://cdn-icons-png.flaticon.com/512/5115/5115293.png';
+const APP_HOME_PATH = '/public';
 
 const listView = document.getElementById('list-view');
 const pickView = document.getElementById('pick-view');
@@ -653,7 +654,7 @@ async function initDetailPage() {
         const authRes = await fetch('/api/auth-status');
         const authData = await authRes.json();
         if (!authData.authenticated) {
-            window.location.href = `/?next=${encodeURIComponent(buildDetailPath(id))}`;
+            window.location.href = `${APP_HOME_PATH}?next=${encodeURIComponent(buildDetailPath(id))}`;
             return;
         }
         currentUser = {
@@ -662,7 +663,7 @@ async function initDetailPage() {
             permissions: authData.permissions || [],
         };
         if (!currentUser.permissions.includes('create_download_link')) {
-            window.location.href = '/';
+            window.location.href = APP_HOME_PATH;
             return;
         }
         await showPick(id);
@@ -679,7 +680,7 @@ async function initListPage() {
         const authRes = await fetch('/api/auth-status');
         const authData = await authRes.json();
         if (!authData.authenticated) {
-            window.location.href = `/?next=${encodeURIComponent('/download')}`;
+            window.location.href = `${APP_HOME_PATH}?next=${encodeURIComponent('/download')}`;
             return;
         }
         currentUser = {
@@ -688,7 +689,7 @@ async function initListPage() {
             permissions: authData.permissions || [],
         };
         if (!currentUser.permissions.includes('create_download_link')) {
-            window.location.href = '/';
+            window.location.href = APP_HOME_PATH;
             return;
         }
 

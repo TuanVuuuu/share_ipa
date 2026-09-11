@@ -38,7 +38,8 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '62';
+const ASSET_VERSION = process.env.ASSET_VERSION || '63';
+const APP_HOME_PATH = '/public';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
 // File IPA upload thẳng từ browser lên R2 (không qua Tunnel) → tốc độ CDN edge.
@@ -632,6 +633,21 @@ function buildOgMeta({ title, description, image, url } = {}) {
     ].join('\n    ');
 }
 
+function isSafeNextPath(raw) {
+    const s = (raw || '').toString().trim();
+    if (!s.startsWith('/') || s.startsWith('//') || s.includes('\\')) return null;
+    if (s === '/' || s === APP_HOME_PATH || s === `${APP_HOME_PATH}/`) return null;
+    return s;
+}
+
+function redirectToAppHome(res, nextPath) {
+    const next = isSafeNextPath(nextPath);
+    if (next && next !== APP_HOME_PATH && next !== `${APP_HOME_PATH}/`) {
+        return res.redirect(`${APP_HOME_PATH}?next=${encodeURIComponent(next)}`);
+    }
+    return res.redirect(APP_HOME_PATH);
+}
+
 function renderPublicHtml(html) {
     const lanBase = resolveConfiguredLanBaseUrl() || '';
     return html
@@ -676,19 +692,43 @@ function sendHtmlWithOg(res, fileName, ogMeta, extras) {
     });
 }
 
-// Các trang HTML được phục vụ động (chèn version) — đặt TRƯỚC express.static để ưu tiên
-app.get('/', (req, res) => {
+function serveIntroPage(req, res) {
     const og = buildOgMeta({
         title: 'Share IPA',
-        description: 'Nền tảng chia sẻ và cài đặt ứng dụng iOS/Android nội bộ. Upload file .ipa hoặc .apk và chia sẻ link cài đặt ngay lập tức.',
+        description: 'Nền tảng chia sẻ và cài đặt ứng dụng iOS/Android nội bộ.',
         url: `${PUBLIC_BASE_URL}/`,
     });
+    sendHtmlWithOg(res, 'intro.html', og);
+}
+
+function serveAppHomePage(req, res) {
+    const og = buildOgMeta({
+        title: 'Share IPA',
+        description: 'Nền tảng chia sẻ và cài đặt ứng dụng iOS/Android nội bộ.',
+        url: `${PUBLIC_BASE_URL}${APP_HOME_PATH}`,
+    });
     sendHtmlWithOg(res, 'index.html', og);
+}
+
+// Các trang HTML được phục vụ động (chèn version) — đặt TRƯỚC express.static để ưu tiên
+app.get('/', (req, res) => {
+    const plist = (req.query.plist || '').toString().trim();
+    if (plist) {
+        const qIndex = req.originalUrl.indexOf('?');
+        return res.redirect('/install' + (qIndex >= 0 ? req.originalUrl.slice(qIndex) : ''));
+    }
+    const next = isSafeNextPath(req.query.next);
+    if (next) return redirectToAppHome(res, next);
+    serveIntroPage(req, res);
 });
+app.get('/index.html', (req, res) => res.redirect('/'));
+app.get('/intro.html', (req, res) => res.redirect('/'));
+app.get(['/public', '/public/'], serveAppHomePage);
 
 // Trang chính và tài nguyên tĩnh mở tự do (không bắt buộc đăng nhập)
 // HTML luôn tải mới, các asset (.js/.css) revalidate để tránh phục vụ bản cũ sau khi deploy
 app.use(express.static('public', {
+    index: false,
     etag: true,
     setHeaders: (res, filePath) => {
         if (filePath.endsWith('.html')) {
@@ -787,7 +827,7 @@ app.get('/api/lan-info', sendLanInfo);
 app.get('/api/lan', sendLanInfo);
 
 // Đường dẫn /login cũ giờ trỏ thẳng về trang chính (ô đăng nhập nằm ngay trong trang)
-app.get('/login', (req, res) => res.redirect('/'));
+app.get('/login', (req, res) => res.redirect(APP_HOME_PATH));
 
 // Trang cài đặt độc lập cho người quét QR (mở màn hình riêng, chỉ hiện 1 bản build)
 app.get('/install', async (req, res) => {
@@ -829,10 +869,10 @@ app.get('/install', async (req, res) => {
 app.get('/download', (req, res) => {
     const user = getSessionUser(req);
     if (!user) {
-        return res.redirect(`/?next=${encodeURIComponent('/download')}`);
+        return redirectToAppHome(res, '/download');
     }
     if (!auth.hasPermission(user, 'create_download_link')) {
-        return res.redirect('/');
+        return redirectToAppHome(res);
     }
     // Link cũ /download?id=... → chuyển sang trang chi tiết
     const legacyId = (req.query.id || '').toString().trim();
@@ -855,10 +895,10 @@ app.get('/download/detail', (req, res) => {
         ? `/download/detail?id=${encodeURIComponent(id)}`
         : '/download';
     if (!user) {
-        return res.redirect(`/?next=${encodeURIComponent(nextPath)}`);
+        return redirectToAppHome(res, nextPath);
     }
     if (!auth.hasPermission(user, 'create_download_link')) {
-        return res.redirect('/');
+        return redirectToAppHome(res);
     }
     if (!id) {
         return res.redirect('/download');
@@ -937,10 +977,10 @@ function servePlatformCatalogPage(req, res, platform) {
     const user = getSessionUser(req);
     const listPath = platform === 'android' ? '/android' : '/ios';
     if (!user) {
-        return res.redirect(`/?next=${encodeURIComponent(listPath)}`);
+        return redirectToAppHome(res, listPath);
     }
     if (!auth.hasPermission(user, 'view_catalog')) {
-        return res.redirect('/');
+        return redirectToAppHome(res);
     }
     const platformLabel = platform === 'android' ? 'Android' : 'iOS';
     const og = buildOgMeta({

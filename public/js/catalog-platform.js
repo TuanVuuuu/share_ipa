@@ -1,4 +1,5 @@
 (function () {
+    const APP_HOME_PATH = '/public';
     const zone = document.getElementById('catalog-platform-zone');
     const titleEl = document.getElementById('platform-title');
     const subEl = document.getElementById('platform-sub');
@@ -29,12 +30,12 @@
             const authRes = await fetch('/api/auth-status');
             const authData = await authRes.json();
             if (!authData.authenticated) {
-                window.location.href = `/?next=${encodeURIComponent(listPath)}`;
+                window.location.href = `${APP_HOME_PATH}?next=${encodeURIComponent(listPath)}`;
                 return;
             }
             const permissions = authData.permissions || [];
             if (!permissions.includes('view_catalog')) {
-                window.location.href = '/';
+                window.location.href = APP_HOME_PATH;
                 return;
             }
 

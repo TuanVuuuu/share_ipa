@@ -6,6 +6,8 @@
     }
 })();
 
+const APP_HOME_PATH = '/public';
+
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 const progressArea = document.getElementById('progress-area');
@@ -113,6 +115,7 @@ function connectLogs() {
 function getSafeNextPath(raw) {
     const s = (raw || '').toString().trim();
     if (!s.startsWith('/') || s.startsWith('//') || s.includes('\\')) return null;
+    if (s === '/' || s === APP_HOME_PATH || s === `${APP_HOME_PATH}/`) return null;
     return s;
 }
 
@@ -348,7 +351,7 @@ async function handleDeleteBuild(build) {
             } else {
                 // Không còn bản build nào của app này — quay về trang chủ (điều hướng SPA, không tải lại trang).
                 // Dùng replaceState (thay vì back()) để tránh phụ thuộc lịch sử trình duyệt và không bị tải lại trang.
-                history.replaceState({ view: 'home' }, '', '/');
+                history.replaceState({ view: 'home' }, '', APP_HOME_PATH);
                 hideAppDetailPanel();
             }
         }
@@ -473,7 +476,7 @@ async function handleDeleteAll(group) {
             return false;
         }).filter((item) => !removedIds.has(item.id));
         renderCatalog(true);
-        history.replaceState({ view: 'home' }, '', '/');
+        history.replaceState({ view: 'home' }, '', APP_HOME_PATH);
         hideAppDetailPanel();
     } catch (err) {
         alert(err.message);
@@ -747,18 +750,22 @@ function showLanBanner(lanUrl, { alreadyOnLan = false } = {}) {
     banner.hidden = false;
     banner.style.display = 'flex';
 
+    const dest = String(lanUrl || '').replace(/\/$/, '')
+        + (window.location.pathname || APP_HOME_PATH)
+        + window.location.search;
+
     if (alreadyOnLan) {
         banner.classList.add('is-active');
         if (title) title.textContent = 'Đang dùng mạng LAN';
-        text.textContent = `${lanUrl} — upload/tải nhanh, không qua Tunnel/R2.`;
+        text.textContent = `${dest} — upload/tải nhanh, không qua Tunnel/R2.`;
         link.style.display = 'none';
         return;
     }
 
     banner.classList.remove('is-active');
     if (title) title.textContent = 'Có bản mạng LAN nhanh hơn';
-    text.textContent = `Cùng Wi‑Fi/LAN với máy chủ? Mở ${lanUrl} để upload nhanh hơn nhiều.`;
-    link.href = lanUrl;
+    text.textContent = `Cùng Wi‑Fi/LAN với máy chủ? Mở ${dest} để upload nhanh hơn nhiều.`;
+    link.href = dest;
     link.textContent = 'Chuyển sang web LAN';
     link.style.display = 'inline-flex';
     link.target = '_self';
