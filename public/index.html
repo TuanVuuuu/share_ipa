@@ -17,23 +17,6 @@
 <div class="container">
     <h2>Share IPA</h2>
 
-    <div class="auth-box" id="auth-box" style="display: none;">
-        <h3>Đăng nhập để tiếp tục</h3>
-        <p>Đăng nhập để mở khoá tính năng tải lên và quản lý bản build.</p>
-        <form class="auth-form" id="auth-form">
-            <div class="auth-field">
-                <label for="auth-username">Tên đăng nhập</label>
-                <input id="auth-username" name="username" type="text" required autocomplete="username" />
-            </div>
-            <div class="auth-field">
-                <label for="auth-password">Mật khẩu</label>
-                <input id="auth-password" name="password" type="password" required autocomplete="current-password" />
-            </div>
-            <button type="submit" class="btn" id="auth-submit">Đăng nhập</button>
-        </form>
-        <div class="auth-error" id="auth-error"></div>
-    </div>
-
     <div class="auth-status" id="auth-status" style="display: none;">
         <span>✅ Đã đăng nhập: <b id="auth-username-label"></b> <span class="auth-role-badge" id="auth-role-badge"></span></span>
         <div class="auth-status-actions">
@@ -213,6 +196,25 @@
         <div id="detail-auth" class="catalog-empty" style="display:none;">
             Vui lòng đăng nhập để xem chi tiết ứng dụng.
         </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="auth-box" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+    <div class="modal-card auth-card">
+        <h3 id="auth-title">Đăng nhập để tiếp tục</h3>
+        <p>Đăng nhập để mở khoá tính năng tải lên và quản lý bản build.</p>
+        <form class="auth-form" id="auth-form">
+            <div class="auth-field">
+                <label for="auth-username">Tên đăng nhập</label>
+                <input id="auth-username" name="username" type="text" required autocomplete="username" />
+            </div>
+            <div class="auth-field">
+                <label for="auth-password">Mật khẩu</label>
+                <input id="auth-password" name="password" type="password" required autocomplete="current-password" />
+            </div>
+            <button type="submit" class="btn" id="auth-submit">Đăng nhập</button>
+        </form>
+        <div class="auth-error" id="auth-error"></div>
     </div>
 </div>
 

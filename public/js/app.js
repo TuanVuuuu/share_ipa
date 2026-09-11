@@ -128,10 +128,19 @@ function redirectIfNextParam() {
     return false;
 }
 
+function setAuthDialogOpen(open) {
+    if (!authBox) return;
+    authBox.style.display = open ? 'flex' : 'none';
+    document.body.classList.toggle('auth-dialog-open', open);
+    if (!open) return;
+    const userInput = document.getElementById('auth-username');
+    if (userInput) setTimeout(() => userInput.focus(), 0);
+}
+
 function applyAuthState(authenticated) {
     isAuthenticated = authenticated;
     if (!authenticated) currentUser = null;
-    authBox.style.display = authenticated ? 'none' : 'block';
+    setAuthDialogOpen(!authenticated);
     authStatus.style.display = authenticated ? 'flex' : 'none';
     if (authenticated && currentUser) {
         authUsernameLabel.innerText = currentUser.username;
@@ -144,6 +153,10 @@ function applyAuthState(authenticated) {
 
     protectedAreas.forEach(el => {
         el.classList.toggle('locked', !canUpload);
+        if (el === dropZone && !authenticated) {
+            el.style.display = '';
+            return;
+        }
         el.style.display = canUpload ? '' : 'none';
     });
 
