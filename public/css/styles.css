@@ -616,8 +616,11 @@ body.auth-dialog-open > :not(.modal-overlay) {
 .vpn-gate p {
     margin: 0;
     font-size: 14px;
-    color: #4b5563;
+    color: var(--danger);
     text-align: center;
+}
+.vpn-gate p:empty {
+    display: none;
 }
 .vpn-gate-actions {
     display: flex;

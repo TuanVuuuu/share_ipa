@@ -194,7 +194,7 @@ async function fetchBuild(id) {
         const res = await fetch(`/api/app-info?id=${encodeURIComponent(id)}`);
         const data = await res.json();
         if (data.vpnRequired) {
-            const err = new Error(data.message || 'Cần kiểm tra mạng VPN');
+            const err = new Error(data.message || 'Không có quyền truy cập');
             err.vpnRequired = true;
             err.needLogin = data.needLogin !== false;
             err.vpn = data.vpn;

@@ -301,7 +301,7 @@ function renderProductList() {
             <div class="dl-app-card-info">
                 <h4>${escapeHtml(product.name)}</h4>
                 ${product.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
-                ${product.vpnRequired ? '<span class="detail-vpn-badge">Cần VPN</span>' : ''}
+                ${product.vpnRequired ? '<span class="detail-vpn-badge">Giới hạn</span>' : ''}
                 <p>${product.iosBundleId ? 'iOS' : '—'}${product.androidBundleId ? ' · Android' : ''}</p>
             </div>
             <span class="dl-app-card-arrow">›</span>
@@ -388,7 +388,7 @@ async function deleteProduct(product) {
     if (!isAdmin() || !product) return false;
     const confirmed = confirm(
         `Xóa thể loại "${product.name}"?\n\n` +
-        `Sẽ xóa toàn bộ thông tin mục này trên GitHub, icon/banner trên máy chủ và mọi link đã lưu.\n` +
+        `Sẽ xóa toàn bộ thông tin mục này, icon/banner trên máy chủ và mọi link đã lưu.\n` +
         `Hành động này KHÔNG THỂ hoàn tác.`
     );
     if (!confirmed) return false;
@@ -411,7 +411,7 @@ async function deleteAllSavedShares(product) {
     if (!isAdmin() || !product) return false;
     const confirmed = confirm(
         `Xóa TẤT CẢ link đã lưu của "${product.name}"?\n\n` +
-        `Toàn bộ link đã lưu trên GitHub sẽ bị xóa. Hành động này KHÔNG THỂ hoàn tác.`
+        `Toàn bộ link đã lưu sẽ bị xóa. Hành động này KHÔNG THỂ hoàn tác.`
     );
     if (!confirmed) return false;
     const confirmedAgain = confirm('Xác nhận lần nữa: xóa toàn bộ link đã lưu?');
@@ -438,7 +438,7 @@ async function toggleProductVpn(product, vpnRequired) {
     });
     const data = await res.json().catch(() => null);
     if (!res.ok || !data || !data.success) {
-        throw new Error((data && data.message) || 'Cập nhật VPN thất bại.');
+        throw new Error((data && data.message) || 'Cập nhật giới hạn truy cập thất bại.');
     }
     return data.item;
 }

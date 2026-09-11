@@ -431,7 +431,7 @@
                 <div class="app-card-info">
                     <h4>${escapeHtml(latest.appName)}</h4>
                     ${group.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
-                    ${group.vpnRequired ? '<span class="detail-vpn-badge">Cần VPN</span>' : ''}
+                    ${group.vpnRequired ? '<span class="detail-vpn-badge">Giới hạn</span>' : ''}
                     <p class="app-card-bundle">${escapeHtml(latest.bundleId)}</p>
                 </div>
             </div>

@@ -82,31 +82,37 @@ function canViewCatalog() {
     return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('view_catalog'));
 }
 
-// Kết nối nhận log real-time từ máy Mac (chỉ khi đã đăng nhập)
+// Kết nối nhận log real-time (chỉ admin)
 let logsReconnectTimer = null;
 
+function disconnectLogs() {
+    clearTimeout(logsReconnectTimer);
+    if (logsSource) {
+        logsSource.close();
+        logsSource = null;
+    }
+}
+
 function connectLogs() {
-    if (logsSource) return;
+    if (!isAdmin() || logsSource) return;
     logsSource = new EventSource('/api/logs');
 
     logsSource.onmessage = function(event) {
         let data;
         try { data = JSON.parse(event.data); } catch (e) { return; }
         appendLog(data.time, data.message, data.type);
-        // Khi đang xử lý, phản chiếu hoạt động thật của máy chủ lên dòng ngay dưới thanh tiến trình
         if (isProcessing && data.type !== 'error') {
             setActivity(data.message, 'active');
         }
     };
 
     logsSource.onerror = function() {
-        // Đóng kết nối lỗi hiện tại rồi tự kết nối lại (nếu vẫn đăng nhập)
         if (logsSource) {
             logsSource.close();
             logsSource = null;
         }
         clearTimeout(logsReconnectTimer);
-        if (isAuthenticated) {
+        if (isAdmin()) {
             logsReconnectTimer = setTimeout(connectLogs, 3000);
         }
     };
@@ -150,6 +156,7 @@ function applyAuthState(authenticated) {
     const canUpload = authenticated && canUploadBuild();
     const canDownloadLink = authenticated && canCreateDownloadLink();
     const showCatalog = authenticated && canViewCatalog();
+    const showLogs = authenticated && isAdmin();
 
     protectedAreas.forEach(el => {
         el.classList.toggle('locked', !canUpload);
@@ -171,28 +178,18 @@ function applyAuthState(authenticated) {
     }
 
     catalogContainer.style.display = showCatalog ? '' : 'none';
-    logsContainer.style.display = canUpload ? '' : 'none';
+    logsContainer.style.display = showLogs ? '' : 'none';
 
     if (authenticated) {
-        if (canUpload) connectLogs();
-        else {
-            clearTimeout(logsReconnectTimer);
-            if (logsSource) {
-                logsSource.close();
-                logsSource = null;
-            }
-        }
+        if (showLogs) connectLogs();
+        else disconnectLogs();
         if (showCatalog) loadCatalog();
         else setCatalogLoading(false);
         if (canDownloadLink) loadDownloadProductsHome();
         refreshLanBanner();
     } else {
         setCatalogLoading(false);
-        clearTimeout(logsReconnectTimer);
-        if (logsSource) {
-            logsSource.close();
-            logsSource = null;
-        }
+        disconnectLogs();
         hideLanBanner();
     }
 }
@@ -428,7 +425,7 @@ async function handleToggleVpn(group, vpnRequired) {
         });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || !data.success) {
-            throw new Error((data && data.message) || 'Cập nhật VPN thất bại.');
+            throw new Error((data && data.message) || 'Cập nhật giới hạn truy cập thất bại.');
         }
         catalogItems = catalogItems.map((item) => {
             if ((item.bundleId || item.id) === bundleId && (item.platform || 'ios') === platform) {
@@ -463,7 +460,7 @@ async function handleDeleteAll(group) {
     const count = (group.builds && group.builds.length) || 0;
     const confirmed = confirm(
         `Xóa TẤT CẢ ${count} bản build của "${group.latest.appName}"?\n\n` +
-        `Sẽ xóa toàn bộ thông tin đã lưu trên GitHub và toàn bộ file bản build trên máy chủ.\n` +
+        `Sẽ xóa toàn bộ thông tin đã lưu và toàn bộ file bản build trên máy chủ.\n` +
         `Hành động này KHÔNG THỂ hoàn tác.`
     );
     if (!confirmed) return;
@@ -568,7 +565,7 @@ async function loadDownloadProductsHome() {
                 <div class="dl-app-card-info">
                     <h4>${escapeHtml(product.name)}</h4>
                     ${product.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
-                    ${product.vpnRequired ? '<span class="detail-vpn-badge">Cần VPN</span>' : ''}
+                    ${product.vpnRequired ? '<span class="detail-vpn-badge">Giới hạn</span>' : ''}
                     <p>${product.iosBundleId ? 'iOS' : '—'}${product.androidBundleId ? ' · Android' : ''}</p>
                 </div>
                 <span class="dl-app-card-arrow">›</span>
@@ -603,7 +600,7 @@ async function loadCatalog() {
         const configured = iosData.configured !== false && androidData.configured !== false;
         vpnInfo = iosData.vpn || androidData.vpn || vpnInfo;
         if (!configured) {
-            catalogSub.innerText = '⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO trong .env nên danh mục trống.';
+            catalogSub.innerText = '⚠️ Chưa cấu hình lưu trữ danh mục trên máy chủ nên danh mục trống.';
         }
         renderCatalog(configured);
     } catch (err) {
@@ -770,14 +767,14 @@ function showLanBanner(lanUrl, { alreadyOnLan = false } = {}) {
     if (alreadyOnLan) {
         banner.classList.add('is-active');
         if (title) title.textContent = 'Đang dùng mạng LAN';
-        text.textContent = `${dest} — upload/tải nhanh, không qua Tunnel/R2.`;
+        text.textContent = 'Upload/tải nhanh trên mạng nội bộ.';
         link.style.display = 'none';
         return;
     }
 
     banner.classList.remove('is-active');
     if (title) title.textContent = 'Có bản mạng LAN nhanh hơn';
-    text.textContent = `Cùng Wi‑Fi/LAN với máy chủ? Mở ${dest} để upload nhanh hơn nhiều.`;
+    text.textContent = 'Cùng Wi‑Fi/LAN với máy chủ? Chuyển sang bản nội bộ để upload nhanh hơn nhiều.';
     link.href = dest;
     link.textContent = 'Chuyển sang web LAN';
     link.style.display = 'inline-flex';
@@ -824,7 +821,6 @@ async function refreshLanBanner() {
     }
 
     showLanBanner(lanUrl, { alreadyOnLan: false });
-    console.info('[LAN] Hiện nút chuyển sang', lanUrl);
 }
 
 function appendLog(time, message, type) {
@@ -966,11 +962,13 @@ function finishUpload(xhr, startedAt) {
     // Proxy/CDN trả về HTML thay vì JSON (quá dung lượng, gateway timeout, mất kết nối...)
     if (!contentType.includes('application/json')) {
         let hint;
-        if (status === 413) hint = 'Tệp vượt quá giới hạn dung lượng cho phép (Cloudflare miễn phí giới hạn 100MB mỗi request).';
+        if (status === 413) hint = 'Tệp vượt quá giới hạn dung lượng cho phép.';
         else if (status === 502 || status === 504) hint = 'Máy chủ phản hồi quá lâu (gateway timeout).';
         else if (status === 0) hint = 'Kết nối tới máy chủ bị gián đoạn giữa chừng.';
         else hint = `Máy chủ trả về phản hồi không phải JSON (mã ${status}).`;
-        failUpload(`${hint} Vui lòng kiểm tra Log Terminal bên dưới.`);
+        failUpload(isAdmin()
+            ? `${hint} Vui lòng kiểm tra log bên dưới.`
+            : `${hint} Vui lòng thử lại.`);
         return;
     }
 
@@ -1064,7 +1062,9 @@ async function _pollJobResult(jobId) {
     while (true) {
         await new Promise(r => setTimeout(r, 2000));
         if (Date.now() - pollStart > 10 * 60 * 1000) {
-            throw new Error('Máy chủ xử lý quá 10 phút, vui lòng kiểm tra Log Terminal hoặc thử lại.');
+            throw new Error(isAdmin()
+                ? 'Máy chủ xử lý quá 10 phút, vui lòng kiểm tra log hoặc thử lại.'
+                : 'Máy chủ xử lý quá 10 phút, vui lòng thử lại.');
         }
         let statusData;
         try {
@@ -1085,7 +1085,7 @@ async function uploadSecure(file) {
 
     const useLan = !!(window.LanTransfer && await window.LanTransfer.canUploadLocally());
     if (useLan) {
-        setActivity('Cùng mạng LAN — gửi 1 luồng thẳng vào máy chủ (không chunk, không R2)...', 'active');
+        setActivity('Cùng mạng LAN — gửi thẳng vào máy chủ...', 'active');
         return uploadViaLanDirect(file, startedAt);
     }
 
@@ -1101,7 +1101,7 @@ async function uploadSecure(file) {
             r2Info = { r2UploadId: r2StartData.r2UploadId, objectKey: r2StartData.objectKey };
         }
         if (r2StartData && r2StartData.skipReason === 'lan') {
-            setActivity('Cùng mạng LAN — gửi 1 luồng thẳng vào máy chủ (không chunk, không R2)...', 'active');
+            setActivity('Cùng mạng LAN — gửi thẳng vào máy chủ...', 'active');
             return uploadViaLanDirect(file, startedAt);
         }
     } catch (_) { /* mạng lỗi → fallback */ }
@@ -1132,7 +1132,7 @@ async function uploadViaLanDirect(file, startedAt) {
             }
         } catch (_) { /* same-origin fallback */ }
 
-        setActivity(`LAN raw upload → ${uploadUrl}...`, 'active');
+        setActivity('Đang gửi file thẳng vào máy chủ...', 'active');
 
         const sendRaw = (url) => new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
@@ -1151,7 +1151,7 @@ async function uploadViaLanDirect(file, startedAt) {
                 if (xhr.status >= 200 && xhr.status < 300 && data && data.success) {
                     resolve(data);
                 } else {
-                    reject(new Error((data && data.message) || `Upload LAN thất bại (HTTP ${xhr.status}).`));
+                    reject(new Error((data && data.message) || `Tải lên qua mạng nội bộ thất bại (HTTP ${xhr.status}).`));
                 }
             });
             xhr.addEventListener('error', () => reject(new Error('Lỗi mạng khi upload LAN.')));
@@ -1168,7 +1168,7 @@ async function uploadViaLanDirect(file, startedAt) {
             fin = await sendRaw(uploadUrl);
         } catch (firstErr) {
             if (uploadUrl !== '/api/upload-lan') {
-                setActivity('LAN :3081 lỗi — fallback qua Caddy :3080...', 'active');
+                setActivity('Kết nối trực tiếp lỗi — chuyển sang đường dự phòng...', 'active');
                 fin = await sendRaw('/api/upload-lan');
             } else {
                 throw firstErr;
@@ -1179,7 +1179,7 @@ async function uploadViaLanDirect(file, startedAt) {
         delete _uploadInFlightBytes[0];
         clearStallWatch();
         updateProgress(92, 'Máy chủ đã nhận xong — đang phân tích...');
-        setActivity('LAN đã nhận đủ dữ liệu — máy chủ đang xử lý...', 'active');
+        setActivity('Đã nhận đủ dữ liệu — máy chủ đang xử lý...', 'active');
 
         if (fin.jobId) {
             const result = await _pollJobResult(fin.jobId);
@@ -1192,7 +1192,7 @@ async function uploadViaLanDirect(file, startedAt) {
     } catch (err) {
         clearInterval(progressTimer);
         clearStallWatch();
-        failUpload(err.message || 'Không thể upload qua LAN.');
+        failUpload(err.message || 'Không thể tải lên qua mạng nội bộ.');
     }
 }
 
@@ -1229,7 +1229,7 @@ async function uploadViaR2(file, startedAt, { r2UploadId, objectKey }) {
                         body: JSON.stringify({ r2UploadId, objectKey, partNumber }),
                     });
                     const data = await res.json().catch(() => null);
-                    if (!data || !data.success) throw new Error((data && data.message) || 'Lỗi lấy presigned URL.');
+                    if (!data || !data.success) throw new Error((data && data.message) || 'Lỗi lấy liên kết tải lên.');
                     presignedUrl = data.presignedUrl;
                 } catch (err) { handleError(err); return; }
 
@@ -1276,7 +1276,7 @@ async function uploadViaR2(file, startedAt, { r2UploadId, objectKey }) {
     try {
         armStallWatch();
         _recordSpeedSample();
-        setActivity(`R2 direct upload — ${CONCURRENCY} luồng song song (không qua Tunnel)...`, 'active');
+        setActivity(`Đang tải lên — ${CONCURRENCY} luồng song song...`, 'active');
 
         let nextPart = 1; // R2 partNumber bắt đầu từ 1
         const worker = async () => {
@@ -1299,8 +1299,8 @@ async function uploadViaR2(file, startedAt, { r2UploadId, objectKey }) {
         await Promise.all(workers);
 
         clearStallWatch();
-        updateProgress(92, 'Upload R2 hoàn tất. Máy chủ đang ghép và phân tích file...');
-        setActivity('R2 đã nhận đủ dữ liệu — máy chủ đang hoàn tất...', 'active');
+        updateProgress(92, 'Tải lên hoàn tất. Máy chủ đang ghép và phân tích file...');
+        setActivity('Đã nhận đủ dữ liệu — máy chủ đang hoàn tất...', 'active');
 
         // Finalize: gửi danh sách ETags để R2 ghép + server parse IPA ở nền
         const finCtrl = new AbortController();
@@ -1320,7 +1320,7 @@ async function uploadViaR2(file, startedAt, { r2UploadId, objectKey }) {
             });
             const finData = await finRes.json().catch(() => null);
             if (!finRes.ok || !finData || !finData.success) {
-                throw new Error((finData && finData.message) || `Lỗi r2-finalize (mã ${finRes.status}).`);
+                throw new Error((finData && finData.message) || `Lỗi hoàn tất tải lên (mã ${finRes.status}).`);
             }
             jobId = finData.jobId;
         } finally {
@@ -1370,11 +1370,11 @@ async function uploadViaChunks(file, startedAt, { viaLan = false } = {}) {
                     if (xhr.status >= 200 && xhr.status < 300 && data && data.success) {
                         resolve();
                     } else {
-                        onError(new Error((data && data.message) || `Chunk #${index + 1} thất bại (HTTP ${xhr.status}).`));
+                        onError(new Error((data && data.message) || `Phần ${index + 1} thất bại (HTTP ${xhr.status}).`));
                     }
                 });
-                xhr.addEventListener('error', () => onError(new Error(`Lỗi mạng chunk #${index + 1}.`)));
-                xhr.addEventListener('timeout', () => onError(new Error(`Chunk #${index + 1} timeout.`)));
+                xhr.addEventListener('error', () => onError(new Error(`Lỗi mạng phần ${index + 1}.`)));
+                xhr.addEventListener('timeout', () => onError(new Error(`Phần ${index + 1} hết thời gian chờ.`)));
                 xhr.timeout = 90 * 1000;
 
                 const onError = (err) => {
@@ -1401,8 +1401,8 @@ async function uploadViaChunks(file, startedAt, { viaLan = false } = {}) {
         armStallWatch();
         _recordSpeedSample();
         setActivity(viaLan
-            ? `LAN upload — ${CONCURRENCY} luồng vào máy chủ nội bộ...`
-            : `Chunk upload — ${CONCURRENCY} luồng song song...`, 'active');
+            ? `Đang gửi ${CONCURRENCY} luồng vào máy chủ nội bộ...`
+            : `Đang tải lên — ${CONCURRENCY} luồng song song...`, 'active');
 
         let nextIndex = 0;
         const worker = async () => {
@@ -1423,7 +1423,7 @@ async function uploadViaChunks(file, startedAt, { viaLan = false } = {}) {
         await Promise.all(workers);
 
         clearStallWatch();
-        updateProgress(92, 'Đã tải xong. Máy chủ đang ghép chunk và phân tích file...');
+        updateProgress(92, 'Đã tải xong. Máy chủ đang ghép và phân tích file...');
         setActivity('Máy chủ đang xử lý...', 'active');
 
         const finCtrl = new AbortController();
@@ -1438,7 +1438,7 @@ async function uploadViaChunks(file, startedAt, { viaLan = false } = {}) {
             });
             const finData = await finRes.json().catch(() => null);
             if (!finRes.ok || !finData || !finData.success) {
-                throw new Error((finData && finData.message) || `Lỗi finalize (mã ${finRes.status}).`);
+                throw new Error((finData && finData.message) || `Lỗi hoàn tất tải lên (mã ${finRes.status}).`);
             }
             jobId = finData.jobId;
         } finally {

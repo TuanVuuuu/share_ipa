@@ -1,6 +1,8 @@
 (function (global) {
     const TIMEOUT_MS = 3000;
     const POLL_MS = 150;
+    const MSG_DENIED = 'Không có quyền truy cập';
+    const MSG_AUTH_ERROR = 'Xác thực lỗi';
 
     function checkUrl() {
         const raw = String(global.__VPN_CHECK_URL__ || '').trim();
@@ -29,7 +31,7 @@
         const res = await fetch('/api/vpn-grant', { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) {
-            throw new Error(data.message || 'Xác thực thất bại.');
+            throw new Error(MSG_AUTH_ERROR);
         }
         global.location.reload();
     }
@@ -38,10 +40,10 @@
         const wrap = document.createElement('div');
         wrap.className = 'vpn-gate';
         wrap.innerHTML = `
-            <h3>Kiểm tra mạng</h3>
-            <p data-vpn-hint>Ứng dụng này cần VPN. Bấm xác thực để mở trang kiểm tra (tối đa 3 giây).</p>
+            <h3>${MSG_DENIED}</h3>
+            <p data-vpn-hint></p>
             <div class="vpn-gate-actions">
-                <button type="button" class="btn vpn-lan-btn" data-vpn-open>Xác thực mạng</button>
+                <button type="button" class="btn vpn-lan-btn" data-vpn-open>Xác thực</button>
             </div>
         `;
         return wrap;
@@ -60,27 +62,27 @@
             }
         };
 
-        const fail = (win, message) => {
+        const fail = (win) => {
             stop();
             closePopup(win);
             openBtn.disabled = false;
-            hint.textContent = message;
+            hint.textContent = MSG_AUTH_ERROR;
         };
 
         openBtn.addEventListener('click', () => {
             const url = checkUrl();
             if (!url) {
-                hint.textContent = 'Chưa cấu hình VPN_CHECK_URL trên server.';
+                hint.textContent = MSG_AUTH_ERROR;
                 return;
             }
 
             stop();
             openBtn.disabled = true;
-            hint.textContent = 'Đang kiểm tra mạng…';
+            hint.textContent = '';
 
             const win = global.open(url, 'share-ipa-vpn-check');
             if (!win) {
-                fail(null, 'Xác thực thất bại. Trình duyệt chặn tab mới — cho phép pop-up rồi thử lại.');
+                fail(null);
                 return;
             }
 
@@ -92,15 +94,14 @@
                 if (state === 'ready' && sawPending) {
                     stop();
                     closePopup(win);
-                    hint.textContent = 'Xác thực thành công. Đang mở ứng dụng…';
-                    grantAndReload().catch((err) => {
+                    grantAndReload().catch(() => {
                         openBtn.disabled = false;
-                        hint.textContent = err.message || 'Xác thực thất bại.';
+                        hint.textContent = MSG_AUTH_ERROR;
                     });
                     return;
                 }
                 if (state === 'closed' || Date.now() - started >= TIMEOUT_MS) {
-                    fail(win, 'Xác thực thất bại. Không nhận được phản hồi trong 3 giây — bật VPN rồi thử lại.');
+                    fail(win);
                 }
             }, POLL_MS);
         });

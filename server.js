@@ -466,7 +466,7 @@ function denyVpnRequired(res, req, message) {
         vpnAccess: false,
         checkUrl: VPN_CHECK_URL,
         vpn: vpnClientInfo(req),
-        message: message || 'Cần kiểm tra mạng VPN để truy cập ứng dụng này.',
+        message: message || 'Không có quyền truy cập.',
     });
 }
 
@@ -1102,7 +1102,7 @@ app.use('/api/upload-lan', (req, res, next) => {
 });
 app.use('/api/upload-chunk', requirePermission('upload_build'));
 app.use('/api/upload-finalize', requirePermission('upload_build'));
-app.use('/api/logs', requirePermission('upload_build'));
+app.use('/api/logs', requireAdmin);
 app.use('/api/catalog', requirePermission('view_catalog'));
 
 const systemLogs = [];
@@ -1500,7 +1500,7 @@ async function cleanupGithubRefsForApp(bundleId, platform, removedIds) {
             );
         }
     } catch (err) {
-        logToUI(`⚠️ Dọn dẹp product/share GitHub sau khi xóa app: ${err.message}`, 'info');
+        logToUI(`⚠️ Dọn dẹp mục download/chia sẻ sau khi xóa app: ${err.message}`, 'info');
     }
 
     try {
@@ -1512,7 +1512,7 @@ async function cleanupGithubRefsForApp(bundleId, platform, removedIds) {
             await saveJsonObjectFile(APP_VISIBILITY_PATH, next, `remove visibility for ${key}`, visFile.sha);
         }
     } catch (err) {
-        logToUI(`⚠️ Dọn cờ ẩn/hiện GitHub sau khi xóa app: ${err.message}`, 'info');
+        logToUI(`⚠️ Dọn cờ ẩn/hiện sau khi xóa app: ${err.message}`, 'info');
     }
 }
 
@@ -1644,7 +1644,7 @@ async function deletePhysicalBuildFiles(record) {
 // Trả về mảng các entry bị xóa (để caller xóa R2 object tương ứng nếu cần).
 async function appendToCatalog(record) {
     if (!github.isConfigured()) {
-        logToUI('⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên bỏ qua bước lưu danh mục.', 'info');
+        logToUI('⚠️ Chưa cấu hình lưu trữ danh mục trên máy chủ nên bỏ qua bước lưu danh mục.', 'info');
         return [];
     }
 
@@ -1731,7 +1731,7 @@ app.post('/api/catalog/delete', requirePermission('delete_build'), async (req, r
             return res.status(400).json({ success: false, message: 'Thiếu id bản build cần xóa.' });
         }
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên không thể cập nhật danh mục.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ danh mục trên máy chủ nên không thể cập nhật danh mục.' });
         }
 
         // Tìm bản build trong đúng catalog theo platform (thử ios trước, sau đó android)
@@ -1785,7 +1785,7 @@ app.post('/api/catalog/visibility', requireAdmin, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Thiếu bundleId hợp lệ.' });
         }
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên không thể cập nhật.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ danh mục trên máy chủ nên không thể cập nhật.' });
         }
 
         const { data, sha } = await loadJsonObjectFile(APP_VISIBILITY_PATH);
@@ -1817,7 +1817,7 @@ app.post('/api/catalog/vpn-required', requireAdmin, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Thiếu bundleId hợp lệ.' });
         }
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên không thể cập nhật.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ danh mục trên máy chủ nên không thể cập nhật.' });
         }
 
         const { data, sha } = await loadJsonObjectFile(APP_VISIBILITY_PATH);
@@ -1833,8 +1833,8 @@ app.post('/api/catalog/vpn-required', requireAdmin, async (req, res) => {
         logToUI(`${vpnRequired ? '🔒' : '🌐'} ${actor} đã ${vpnRequired ? 'khoá nội bộ' : 'mở public'} ${bundleId} (${platform})`, 'info');
         return res.json({ success: true, bundleId, platform, vpnRequired });
     } catch (err) {
-        logToUI(`❌ Lỗi khi cập nhật VPN: ${err.message}`, 'error');
-        return res.status(500).json({ success: false, message: `Lỗi khi cập nhật VPN: ${err.message}` });
+        logToUI(`❌ Lỗi khi cập nhật giới hạn truy cập: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi khi cập nhật giới hạn truy cập: ${err.message}` });
     }
 });
 
@@ -1849,7 +1849,7 @@ app.post('/api/catalog/delete-app', requireAdmin, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Thiếu bundleId hợp lệ.' });
         }
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO nên không thể cập nhật danh mục.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ danh mục trên máy chủ nên không thể cập nhật danh mục.' });
         }
 
         const { list, sha } = await loadCatalogFile(platform);
@@ -1910,7 +1910,7 @@ app.get('/api/download-products', requirePermission('create_download_link'), asy
 app.post('/api/download-products', requirePermission('manage_download_products'), async (req, res) => {
     try {
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể lưu mục download.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ nên không thể lưu mục download.' });
         }
         const name = (req.body?.name || '').toString().trim();
         const iosBundleId = (req.body?.iosBundleId || '').toString().trim();
@@ -1955,7 +1955,7 @@ app.post('/api/download-products', requirePermission('manage_download_products')
 app.post('/api/download-products/update', requirePermission('manage_download_products'), async (req, res) => {
     try {
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể cập nhật mục download.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ nên không thể cập nhật mục download.' });
         }
         const id = (req.body?.id || '').toString().trim();
         const name = (req.body?.name || '').toString().trim();
@@ -2003,7 +2003,7 @@ app.post('/api/download-products/update', requirePermission('manage_download_pro
 app.post('/api/download-products/delete', requirePermission('manage_download_products'), async (req, res) => {
     try {
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể xóa mục download.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ nên không thể xóa mục download.' });
         }
         const id = (req.body?.id || '').toString().trim();
         const { list, sha } = await loadJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
@@ -2031,7 +2031,7 @@ app.post('/api/download-products/delete', requirePermission('manage_download_pro
 app.post('/api/download-products/visibility', requireAdmin, async (req, res) => {
     try {
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể cập nhật.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ nên không thể cập nhật.' });
         }
         const id = (req.body?.id || '').toString().trim();
         const hidden = req.body?.hidden === true || req.body?.hidden === 'true';
@@ -2063,7 +2063,7 @@ app.post('/api/download-products/visibility', requireAdmin, async (req, res) => 
 app.post('/api/download-products/vpn-required', requireAdmin, async (req, res) => {
     try {
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể cập nhật.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ nên không thể cập nhật.' });
         }
         const id = (req.body?.id || '').toString().trim();
         const vpnRequired = req.body?.vpnRequired === true || req.body?.vpnRequired === 'true';
@@ -2088,7 +2088,7 @@ app.post('/api/download-products/vpn-required', requireAdmin, async (req, res) =
         logToUI(`${vpnRequired ? '🔒' : '🌐'} ${actor} đã ${vpnRequired ? 'khoá nội bộ' : 'mở public'} mục download "${list[idx].name}"`, 'info');
         return res.json({ success: true, item: publicProduct(list[idx]) });
     } catch (err) {
-        return res.status(500).json({ success: false, message: `Lỗi cập nhật VPN mục download: ${err.message}` });
+        return res.status(500).json({ success: false, message: `Lỗi cập nhật giới hạn truy cập mục download: ${err.message}` });
     }
 });
 
@@ -2168,7 +2168,7 @@ app.get('/api/download-shares', requirePermission('create_download_link'), async
 app.post('/api/download-shares', requirePermission('create_download_link'), async (req, res) => {
     try {
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể lưu link.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ nên không thể lưu link.' });
         }
         const productId = (req.body?.productId || '').toString().trim();
         const iosBuildId = (req.body?.iosBuildId || '').toString().trim() || null;
@@ -2235,7 +2235,7 @@ app.post('/api/download-shares', requirePermission('create_download_link'), asyn
 app.post('/api/download-shares/delete', requirePermission('create_download_link'), async (req, res) => {
     try {
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể xóa link.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ nên không thể xóa link.' });
         }
         const id = (req.body?.id || '').toString().trim();
         const { list, sha } = await loadJsonArrayFile(DOWNLOAD_SHARES_PATH);
@@ -2258,7 +2258,7 @@ app.post('/api/download-shares/delete', requirePermission('create_download_link'
 app.post('/api/download-shares/delete-all', requireAdmin, async (req, res) => {
     try {
         if (!github.isConfigured()) {
-            return res.status(500).json({ success: false, message: 'Chưa cấu hình GitHub nên không thể xóa link.' });
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ nên không thể xóa link.' });
         }
         const productId = (req.body?.productId || '').toString().trim();
         if (!productId) return res.status(400).json({ success: false, message: 'Thiếu productId.' });
@@ -2482,7 +2482,7 @@ function receiveUpload(req, res, next) {
     req.on('aborted', () => {
         clearInterval(slowWatch);
         console.error('[UPLOAD] ❌ Client/proxy đã ngắt kết nối giữa chừng (request aborted).');
-        logToUI('❌ Kết nối tải lên bị ngắt giữa chừng (client/proxy đóng kết nối).', 'error');
+        logToUI('❌ Kết nối tải lên bị ngắt giữa chừng.', 'error');
     });
 
     uploadSingle(req, res, (err) => {
@@ -2567,8 +2567,8 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
     const packageLabel = platform === 'android' ? 'APK' : 'IPA';
 
     try {
-        await logRealtime(`📥 Đã nhận và lưu kho tệp tin (${formattedTotalSize}) thành công vào ổ đĩa Mac!`, 'success');
-        await logRealtime(`⚡ Bắt đầu bóc tách Metadata ${packageLabel} bằng AppInfoParser...`, 'info');
+        await logRealtime(`📥 Đã nhận và lưu tệp tin (${formattedTotalSize}) thành công.`, 'success');
+        await logRealtime(`⚡ Bắt đầu bóc tách thông tin ${packageLabel}...`, 'info');
 
         const parser = new AppInfoParser(finalPath);
 
@@ -2693,7 +2693,7 @@ async function processUploadedIpa(res, { finalFilename, finalPath, fileSizeBytes
                         uploadedBy: uploadedBy || null,   // lưu vết ai đã đẩy bản build này
                     };
 
-                    await logRealtime('☁️ Đang đồng bộ thông tin app lên danh mục GitHub...', 'info');
+                    await logRealtime('☁️ Đang đồng bộ thông tin app lên danh mục...', 'info');
                     const removedFromCatalog = await appendToCatalog(catalogRecord);
 
                     // Xóa R2 + cache LAN local của các entry bị loại khỏi danh mục
@@ -2728,7 +2728,7 @@ app.post('/api/upload-secure', receiveUpload, async (req, res) => {
     const viaLan = isLanRequest(req);
     if (viaLan) {
         await logRealtime(
-            `📡 LAN direct upload — đã nhận ${formatBytes(req.file.size)} (không qua R2/Tunnel).`,
+            `📡 Đã nhận file qua mạng nội bộ (${formatBytes(req.file.size)}).`,
             'success'
         );
     }
@@ -2768,7 +2768,7 @@ app.post('/api/upload-lan', (req, res) => {
     let received = 0;
 
     logToUI(
-        `📡 LAN raw upload bắt đầu: ${safeName}${expected ? ` (${formatBytes(expected)})` : ''} → stream ra đĩa`,
+        `📡 Bắt đầu nhận file qua mạng nội bộ: ${safeName}${expected ? ` (${formatBytes(expected)})` : ''}`,
         'info'
     );
 
@@ -2777,12 +2777,12 @@ app.post('/api/upload-lan', (req, res) => {
     req.on('aborted', () => {
         ws.destroy();
         fs.promises.unlink(finalPath).catch(() => {});
-        logToUI('❌ LAN upload bị ngắt giữa chừng.', 'error');
+        logToUI('❌ Tải lên qua mạng nội bộ bị ngắt giữa chừng.', 'error');
     });
     req.pipe(ws);
 
     ws.on('error', (err) => {
-        logToUI(`❌ Lỗi ghi đĩa LAN upload: ${err.message}`, 'error');
+        logToUI(`❌ Lỗi ghi đĩa khi nhận file nội bộ: ${err.message}`, 'error');
         if (!res.headersSent) {
             res.status(500).json({ success: false, message: `Lỗi ghi đĩa: ${err.message}` });
         }
@@ -2793,7 +2793,7 @@ app.post('/api/upload-lan', (req, res) => {
         const mbps = received > 0 && ms > 0 ? ((received * 8) / (ms / 1000) / 1e6).toFixed(1) : '?';
         const mBps = received > 0 && ms > 0 ? ((received / (1024 * 1024)) / (ms / 1000)).toFixed(1) : '?';
         await logRealtime(
-            `📡 LAN raw xong: ${formatBytes(received)} trong ${(ms / 1000).toFixed(1)}s (~${mBps} MB/s / ${mbps} Mbps)`,
+            `📡 Đã nhận xong file nội bộ: ${formatBytes(received)} trong ${(ms / 1000).toFixed(1)}s (~${mBps} MB/s / ${mbps} Mbps)`,
             'success'
         );
 
@@ -2818,14 +2818,14 @@ app.post('/api/upload-lan', (req, res) => {
                 if (mockRes._statusCode >= 200 && mockRes._statusCode < 300 && mockRes._body?.success) {
                     jobStore.set(jobId, { status: 'done', result: mockRes._body, createdAt: Date.now() });
                 } else {
-                    const errMsg = mockRes._body?.message || 'Lỗi xử lý file sau LAN upload.';
+                    const errMsg = mockRes._body?.message || 'Lỗi xử lý file sau khi nhận qua mạng nội bộ.';
                     jobStore.set(jobId, { status: 'error', error: errMsg, createdAt: Date.now() });
                     fs.promises.unlink(finalPath).catch(() => {});
                 }
             } catch (err) {
                 jobStore.set(jobId, { status: 'error', error: err.message, createdAt: Date.now() });
                 fs.promises.unlink(finalPath).catch(() => {});
-                logToUI(`❌ LAN processing failed: ${err.message}`, 'error');
+                logToUI(`❌ Xử lý file sau khi nhận qua mạng nội bộ thất bại: ${err.message}`, 'error');
             }
         })();
     });
@@ -2839,26 +2839,26 @@ app.post('/api/upload-chunk', chunkUpload.single('chunk'), async (req, res) => {
         const total = Number(totalChunks);
 
         if (!uploadId || !Number.isInteger(idx) || idx < 0 || !Number.isInteger(total) || total <= 0) {
-            return res.status(400).json({ success: false, message: 'Thiếu hoặc sai metadata chunk.' });
+            return res.status(400).json({ success: false, message: 'Thiếu hoặc sai thông tin phần tải lên.' });
         }
         if (!req.file || !req.file.buffer) {
-            return res.status(400).json({ success: false, message: 'Không nhận được dữ liệu chunk.' });
+            return res.status(400).json({ success: false, message: 'Không nhận được dữ liệu tải lên.' });
         }
 
         const chunkPath = path.join(CHUNKS_DIR, `upload_${uploadId}_${idx}`);
         await fs.promises.writeFile(chunkPath, req.file.buffer);
 
         if (idx === 0) {
-            await logRealtime(`🧩 Bắt đầu nhận upload theo chunk (ID: ${uploadId}, tổng ${total} phần)...`, 'info');
+            await logRealtime(`🧩 Bắt đầu nhận tải lên theo phần (tổng ${total} phần)...`, 'info');
         }
         if (idx === total - 1) {
-            await logRealtime(`🧩 Đã nhận xong ${total}/${total} chunk. Chuẩn bị ghép tệp...`, 'info');
+            await logRealtime(`🧩 Đã nhận xong ${total}/${total} phần. Chuẩn bị ghép tệp...`, 'info');
         }
 
         return res.json({ success: true, chunkIndex: idx });
     } catch (err) {
-        logToUI(`❌ Lỗi nhận chunk: ${err.message}`, 'error');
-        return res.status(500).json({ success: false, message: `Lỗi nhận chunk: ${err.message}` });
+        logToUI(`❌ Lỗi nhận phần tải lên: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi nhận phần tải lên: ${err.message}` });
     }
 });
 
@@ -2892,14 +2892,14 @@ app.post('/api/upload-finalize', async (req, res) => {
         const total = Number(totalChunks);
 
         if (!uploadId || !Number.isInteger(total) || total <= 0 || !originalName) {
-            return res.status(400).json({ success: false, message: 'Thiếu thông tin để finalize upload.' });
+            return res.status(400).json({ success: false, message: 'Thiếu thông tin để hoàn tất tải lên.' });
         }
 
         // Kiểm tra nhanh tất cả chunk đã có mặt trước khi nhận job
         for (let i = 0; i < total; i++) {
             const chunkPath = path.join(CHUNKS_DIR, `upload_${uploadId}_${i}`);
             if (!fs.existsSync(chunkPath)) {
-                return res.status(400).json({ success: false, message: `Thiếu chunk #${i}. Vui lòng upload lại.` });
+                return res.status(400).json({ success: false, message: `Thiếu phần dữ liệu #${i}. Vui lòng tải lên lại.` });
             }
         }
 
@@ -2917,7 +2917,7 @@ app.post('/api/upload-finalize', async (req, res) => {
                 const finalFilename = `app_${Date.now()}_${safeOriginalName}`;
                 const finalPath = path.join(UPLOADS_MAIN_DIR, finalFilename);
 
-                await logRealtime(`🧵 Bắt đầu ghép ${total} chunk thành tệp hoàn chỉnh...`, 'info');
+                await logRealtime(`🧵 Bắt đầu ghép ${total} phần thành tệp hoàn chỉnh...`, 'info');
 
                 for (let i = 0; i < total; i++) {
                     const chunkPath = path.join(CHUNKS_DIR, `upload_${uploadId}_${i}`);
@@ -2928,7 +2928,7 @@ app.post('/api/upload-finalize', async (req, res) => {
 
                 const fileStat = await fs.promises.stat(finalPath);
                 const expectedSize = Number(totalSize) || fileStat.size;
-                await logRealtime(`🧵 Ghép chunk hoàn tất (${formatBytes(fileStat.size)}). Chuyển sang xử lý file...`, 'success');
+                await logRealtime(`🧵 Ghép tệp hoàn tất (${formatBytes(fileStat.size)}). Chuyển sang xử lý file...`, 'success');
 
                 // processUploadedIpa gọi res.json() để trả kết quả — ta dùng mock res để bắt kết quả
                 const mockRes = {
@@ -2949,12 +2949,12 @@ app.post('/api/upload-finalize', async (req, res) => {
                 }
             } catch (err) {
                 jobStore.set(jobId, { status: 'error', error: err.message, createdAt: Date.now() });
-                logToUI(`❌ Lỗi finalize nền (job ${jobId}): ${err.message}`, 'error');
+                logToUI(`❌ Lỗi hoàn tất tải lên nền (job ${jobId}): ${err.message}`, 'error');
             }
         })();
     } catch (err) {
-        logToUI(`❌ Lỗi finalize upload chunk: ${err.message}`, 'error');
-        return res.status(500).json({ success: false, message: `Lỗi ghép chunk: ${err.message}` });
+        logToUI(`❌ Lỗi hoàn tất ghép tệp: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi ghép tệp: ${err.message}` });
     }
 });
 
@@ -2966,10 +2966,10 @@ app.use('/api/r2-finalize', requirePermission('upload_build'));
 // Bước 1: Khởi tạo multipart upload trên R2, nhận UploadId + objectKey
 app.post('/api/r2-start', async (req, res) => {
     if (!r2Client) {
-        return res.json({ success: false, r2Available: false, message: 'R2 chưa được cấu hình trên máy chủ.' });
+        return res.json({ success: false, r2Available: false, message: 'Kho lưu trữ chưa được cấu hình trên máy chủ.' });
     }
     if (isLanRequest(req)) {
-        logToUI('📡 Cùng mạng LAN — nhận file trực tiếp, không qua R2.', 'info');
+        logToUI('📡 Cùng mạng LAN — nhận file trực tiếp.', 'info');
         return res.json({ success: true, r2Available: false, skipReason: 'lan' });
     }
     try {
@@ -2986,21 +2986,21 @@ app.post('/api/r2-start', async (req, res) => {
             ContentType: contentType,
         }));
 
-        logToUI(`🚀 R2 multipart upload bắt đầu: ${safeName}`, 'info');
+        logToUI(`🚀 Bắt đầu tải lên: ${safeName}`, 'info');
         return res.json({ success: true, r2Available: true, r2UploadId: UploadId, objectKey });
     } catch (err) {
         console.error('[R2] r2-start error:', err.message);
-        return res.status(500).json({ success: false, message: `Lỗi khởi tạo R2 upload: ${err.message}` });
+        return res.status(500).json({ success: false, message: `Lỗi khởi tạo tải lên: ${err.message}` });
     }
 });
 
 // Bước 2: Server ký presigned URL để client PUT từng part thẳng lên R2
 app.post('/api/r2-part-url', async (req, res) => {
-    if (!r2Client) return res.status(500).json({ success: false, message: 'R2 chưa được cấu hình.' });
+    if (!r2Client) return res.status(500).json({ success: false, message: 'Kho lưu trữ chưa được cấu hình.' });
     try {
         const { r2UploadId, objectKey, partNumber } = req.body;
         if (!r2UploadId || !objectKey || !partNumber) {
-            return res.status(400).json({ success: false, message: 'Thiếu tham số r2UploadId/objectKey/partNumber.' });
+            return res.status(400).json({ success: false, message: 'Thiếu thông tin để tiếp tục tải lên.' });
         }
         const url = await r2GetSignedUrl(
             r2Client,
@@ -3015,19 +3015,19 @@ app.post('/api/r2-part-url', async (req, res) => {
         return res.json({ success: true, presignedUrl: url });
     } catch (err) {
         console.error('[R2] r2-part-url error:', err.message);
-        return res.status(500).json({ success: false, message: `Lỗi tạo presigned URL: ${err.message}` });
+        return res.status(500).json({ success: false, message: `Lỗi tạo liên kết tải lên: ${err.message}` });
     }
 });
 
 // Bước 3: Hoàn tất multipart upload, kích hoạt xử lý IPA ở nền
 // Trả về jobId ngay, client polling /api/upload-status/:jobId
 app.post('/api/r2-finalize', async (req, res) => {
-    if (!r2Client) return res.status(500).json({ success: false, message: 'R2 chưa được cấu hình.' });
+    if (!r2Client) return res.status(500).json({ success: false, message: 'Kho lưu trữ chưa được cấu hình.' });
     try {
         const { r2UploadId, objectKey, parts, originalName = '', totalSize = 0 } = req.body;
 
         if (!r2UploadId || !objectKey || !Array.isArray(parts) || !parts.length) {
-            return res.status(400).json({ success: false, message: 'Thiếu thông tin để hoàn tất R2 upload.' });
+            return res.status(400).json({ success: false, message: 'Thiếu thông tin để hoàn tất tải lên.' });
         }
 
         // Hoàn tất multipart upload trên R2 (R2 ghép tất cả parts lại)
@@ -3054,7 +3054,7 @@ app.post('/api/r2-finalize', async (req, res) => {
             let keepLocalCache = false;
             let finalFilename = path.basename(objectKey);
             try {
-                await logRealtime('☁️ R2 đã nhận xong. Đang tải file về máy chủ để phân tích...', 'info');
+                await logRealtime('☁️ Đã nhận xong file. Đang tải về máy chủ để phân tích...', 'info');
 
                 const { Body } = await r2Client.send(new _R2Cmd.GetObjectCommand({
                     Bucket: process.env.R2_BUCKET,
@@ -3086,12 +3086,12 @@ app.post('/api/r2-finalize', async (req, res) => {
                 } else {
                     const errMsg = mockRes._body?.message || 'Lỗi không xác định khi xử lý file.';
                     jobStore.set(jobId, { status: 'error', error: errMsg, createdAt: Date.now() });
-                    logToUI(`❌ R2 processing failed (job ${jobId}): ${errMsg}`, 'error');
+                    logToUI(`❌ Xử lý file thất bại (job ${jobId}): ${errMsg}`, 'error');
                     await deleteR2Object(objectKey); // Dọn object lỗi khỏi R2
                 }
             } catch (err) {
                 jobStore.set(jobId, { status: 'error', error: err.message, createdAt: Date.now() });
-                logToUI(`❌ Lỗi r2-finalize nền (job ${jobId}): ${err.message}`, 'error');
+                logToUI(`❌ Lỗi hoàn tất tải lên nền (job ${jobId}): ${err.message}`, 'error');
                 await deleteR2Object(objectKey);
             } finally {
                 if (keepLocalCache) {
@@ -3103,9 +3103,9 @@ app.post('/api/r2-finalize', async (req, res) => {
                                 await fs.promises.unlink(tmpPath);
                             });
                         }
-                        await logRealtime('📡 Đã giữ bản local để tải nhanh qua LAN.', 'info');
+                        await logRealtime('📡 Đã giữ bản trên máy chủ để tải nhanh qua mạng nội bộ.', 'info');
                     } catch (cacheErr) {
-                        logToUI(`⚠️ Không giữ được cache LAN: ${cacheErr.message}`, 'info');
+                        logToUI(`⚠️ Không giữ được bản tải nhanh trên máy chủ: ${cacheErr.message}`, 'info');
                         fs.promises.unlink(tmpPath).catch(() => {});
                     }
                 } else {
@@ -3114,8 +3114,8 @@ app.post('/api/r2-finalize', async (req, res) => {
             }
         })();
     } catch (err) {
-        logToUI(`❌ Lỗi r2-finalize: ${err.message}`, 'error');
-        return res.status(500).json({ success: false, message: `Lỗi hoàn tất R2 upload: ${err.message}` });
+        logToUI(`❌ Lỗi hoàn tất tải lên: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi hoàn tất tải lên: ${err.message}` });
     }
 });
 // ─────────────────────────────────────────────────────────────────────────────

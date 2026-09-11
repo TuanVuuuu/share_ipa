@@ -57,7 +57,7 @@
 
             if (subEl) {
                 subEl.textContent = data.configured === false
-                    ? '⚠️ Chưa cấu hình GITHUB_TOKEN/GITHUB_REPO trong .env nên danh mục trống.'
+                    ? '⚠️ Chưa cấu hình lưu trữ danh mục trên máy chủ nên danh mục trống.'
                     : `${groups.length} ứng dụng ${platformLabel}.`;
             }
 

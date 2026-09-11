@@ -29,8 +29,7 @@ async function getFile(filePath) {
 
     if (res.status === 404) return null;
     if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`GitHub getFile ${filePath} lỗi ${res.status}: ${text}`);
+        throw new Error(`Không đọc được ${filePath} (mã ${res.status}).`);
     }
 
     const data = await res.json();
@@ -57,8 +56,7 @@ async function putFile(filePath, contentBuffer, message, sha) {
     });
 
     if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`GitHub putFile ${filePath} lỗi ${res.status}: ${text}`);
+        throw new Error(`Không ghi được ${filePath} (mã ${res.status}).`);
     }
 
     return res.json();

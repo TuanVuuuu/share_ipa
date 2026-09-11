@@ -118,7 +118,7 @@ async function handleToggleVpn(group, vpnRequired) {
         });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || !data.success) {
-            throw new Error((data && data.message) || 'Cập nhật VPN thất bại.');
+            throw new Error((data && data.message) || 'Cập nhật giới hạn truy cập thất bại.');
         }
         const builds = (group.builds || []).map((item) => ({ ...item, vpnRequired }));
         detailView.renderAppDetail(currentGroupFromBuilds(builds, {
@@ -142,7 +142,7 @@ async function handleDeleteAll(group) {
     const count = (group.builds && group.builds.length) || 0;
     const confirmed = confirm(
         `Xóa TẤT CẢ ${count} bản build của "${group.latest.appName}"?\n\n` +
-        `Sẽ xóa toàn bộ thông tin đã lưu trên GitHub và toàn bộ file bản build trên máy chủ.\n` +
+        `Sẽ xóa toàn bộ thông tin đã lưu và toàn bộ file bản build trên máy chủ.\n` +
         `Hành động này KHÔNG THỂ hoàn tác.`
     );
     if (!confirmed) return;
