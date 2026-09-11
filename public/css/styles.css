@@ -2015,12 +2015,12 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     border-color: rgba(253, 92, 0, 0.14);
 }
 .intro-qr-art {
-    width: 72px;
-    height: 72px;
+    width: 96px;
+    height: 96px;
+    object-fit: contain;
     flex: 0 0 auto;
-    margin-bottom: 16px;
-    border-radius: 14px;
-    box-shadow: 0 6px 16px rgba(29, 29, 31, 0.08);
+    margin: 0 0 14px;
+    display: block;
 }
 .intro-card--wide { grid-column: span 4; }
 .intro-card--mid { grid-column: span 3; }
