@@ -2010,15 +2010,21 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     grid-column: span 2;
     grid-row: span 2;
     min-height: 240px;
+    padding: 20px 18px 18px;
+    background: rgba(255, 243, 236, 0.94);
+    border-color: rgba(253, 92, 0, 0.14);
+}
+.intro-qr-art {
+    width: 72px;
+    height: 72px;
+    flex: 0 0 auto;
+    margin-bottom: 16px;
+    border-radius: 14px;
+    box-shadow: 0 6px 16px rgba(29, 29, 31, 0.08);
 }
 .intro-card--wide { grid-column: span 4; }
 .intro-card--mid { grid-column: span 3; }
 .intro-card--sm { grid-column: span 2; }
-.intro-card--accent {
-    background: linear-gradient(165deg, #fd5c00 0%, #d94f00 100%);
-    border: none;
-    color: #fff;
-}
 .intro-kicker {
     margin: 0 0 8px;
     font-size: 11px;
@@ -2026,14 +2032,6 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--primary);
-}
-.intro-card--accent .intro-kicker,
-.intro-card--accent h2,
-.intro-card--accent p {
-    color: #fff;
-}
-.intro-card--accent p {
-    color: rgba(255, 255, 255, 0.9);
 }
 .intro-card h2 {
     margin: 0 0 8px;
@@ -2043,9 +2041,11 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     letter-spacing: -0.02em;
 }
 .intro-card--hero h2,
-.intro-card--tall h2,
 .intro-card--wide h2 {
     font-size: 24px;
+}
+.intro-card--tall h2 {
+    font-size: 20px;
 }
 .intro-card p {
     margin: 0;
@@ -2073,6 +2073,9 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     border-radius: 999px;
     padding: 5px 10px;
 }
+.intro-card--tall .intro-tag {
+    background: #fff;
+}
 .intro-foot {
     margin: 28px 0 0;
     font-size: 13px;
@@ -2090,8 +2093,8 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
     .intro-card--mid,
     .intro-card--sm { grid-column: span 1; }
     .intro-card--hero h2,
-    .intro-card--tall h2,
     .intro-card--wide h2 { font-size: 20px; }
+    .intro-card--tall h2 { font-size: 18px; }
 }
 @media (max-width: 560px) {
     .intro-title { font-size: 28px; }
