@@ -38,7 +38,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '63';
+const ASSET_VERSION = process.env.ASSET_VERSION || '64';
 const APP_HOME_PATH = '/public';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────

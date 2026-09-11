@@ -1912,11 +1912,39 @@ h2 { text-align: center; margin-top: 0; font-weight: 600; }
 }
 
 .intro-body {
+    position: relative;
+    isolation: isolate;
     min-height: 100vh;
     padding: 32px 20px;
+    background: #fff;
+    overflow-x: hidden;
+}
+.intro-body::before,
+.intro-body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+}
+.intro-body::before {
+    z-index: -2;
     background:
-        radial-gradient(1200px 480px at 50% -80px, rgba(253, 92, 0, 0.16), transparent 70%),
-        var(--bg);
+        radial-gradient(ellipse 72% 58% at -6% -8%, #fd5c00 0%, rgba(253, 92, 0, 0.55) 28%, transparent 64%),
+        radial-gradient(ellipse 58% 50% at 108% 0%, rgba(253, 92, 0, 0.92) 0%, rgba(253, 92, 0, 0.38) 34%, transparent 62%),
+        radial-gradient(ellipse 64% 48% at 102% 102%, rgba(253, 92, 0, 0.78) 0%, rgba(253, 92, 0, 0.32) 36%, transparent 66%),
+        radial-gradient(ellipse 80% 56% at -4% 108%, rgba(253, 92, 0, 0.7) 0%, rgba(253, 92, 0, 0.28) 40%, transparent 68%),
+        radial-gradient(ellipse 42% 36% at 28% 22%, rgba(253, 92, 0, 0.34) 0%, transparent 70%),
+        radial-gradient(ellipse 38% 46% at 74% 36%, rgba(253, 92, 0, 0.26) 0%, transparent 68%),
+        radial-gradient(ellipse 50% 32% at 62% 78%, rgba(253, 92, 0, 0.3) 0%, transparent 72%),
+        radial-gradient(ellipse 28% 24% at 14% 58%, rgba(253, 92, 0, 0.22) 0%, transparent 74%),
+        #ffffff;
+}
+.intro-body::after {
+    z-index: -1;
+    opacity: 0.42;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.018' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 240px 240px;
 }
 .intro-shell {
     width: 100%;
