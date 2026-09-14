@@ -25,7 +25,7 @@ const DOWNLOAD_PRODUCTS_PATH = 'download-products.json'; // Mục download do ad
 const DOWNLOAD_SHARES_PATH = 'download-shares.json';     // Link do tester tạo và lưu
 const APP_VISIBILITY_PATH = 'app-visibility.json';       // Ẩn/hiện + khoá nội bộ (vpnRequired) theo platform + bundleId (admin)
 const VPN_PORTAL_URL = (process.env.VPN_PORTAL_URL || '').trim();
-const VPN_CHECK_URL = (process.env.VPN_CHECK_URL || '').trim();
+const VPN_CHECK_URL = (process.env.VPN_CHECK_URL || 'http://10.110.131.11:8080').trim();
 const VPN_GRANT_TTL_SEC = Math.max(10, Number(process.env.VPN_GRANT_TTL_SEC) || 30);
 const VPN_ALLOWED_CIDRS = [...new Set([
     ...(process.env.VPN_ALLOWED_CIDRS || '').split(',').map((s) => s.trim()).filter(Boolean),
@@ -38,7 +38,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '67';
+const ASSET_VERSION = process.env.ASSET_VERSION || '69';
 const APP_HOME_PATH = '/public';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
@@ -398,8 +398,16 @@ function hasVpnGrant(req) {
     return auth.verifyFileAccessToken(cookies[VPN_COOKIE_NAME] || '', '_vpn');
 }
 
+function isVpnClientIp(req) {
+    const ips = collectClientIps(req);
+    if (!ips.length) return false;
+    const allowed = VPN_ALLOWED_CIDRS.concat(vpnPortalEgressIps);
+    return ips.some((ip) => allowed.some((cidr) => ipMatchesCidr(ip, cidr)));
+}
+
 function hasVpnAccess(req) {
     if (hasVpnGrant(req)) return true;
+    if (isVpnClientIp(req)) return true;
     if (isLanRequest(req)) return true;
     return false;
 }

@@ -6,19 +6,18 @@
 
     function checkUrl() {
         const raw = String(global.__VPN_CHECK_URL__ || '').trim();
-        if (!raw || raw.indexOf('__VPN_CHECK__') !== -1) return '';
-        return raw;
+        if (raw && raw.indexOf('__VPN_CHECK__') === -1) return raw;
+        return 'http://10.110.131.11:8080';
     }
 
-    function popupState(win) {
-        if (!win) return 'blocked';
-        if (win.closed) return 'closed';
+    function popupReached(win) {
+        if (!win || win.closed) return false;
         try {
             const href = String((win.location && win.location.href) || '');
-            if (!href || href === 'about:blank') return 'pending';
-            return 'pending';
+            if (!href || href === 'about:blank') return false;
+            return true;
         } catch (_) {
-            return 'ready';
+            return true;
         }
     }
 
@@ -87,11 +86,8 @@
             }
 
             const started = Date.now();
-            let sawPending = false;
             timer = setInterval(() => {
-                const state = popupState(win);
-                if (state === 'pending') sawPending = true;
-                if (state === 'ready' && sawPending) {
+                if (popupReached(win)) {
                     stop();
                     closePopup(win);
                     grantAndReload().catch(() => {
@@ -100,7 +96,7 @@
                     });
                     return;
                 }
-                if (state === 'closed' || Date.now() - started >= TIMEOUT_MS) {
+                if (win.closed || Date.now() - started >= TIMEOUT_MS) {
                     fail(win);
                 }
             }, POLL_MS);
