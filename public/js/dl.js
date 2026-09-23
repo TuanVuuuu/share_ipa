@@ -30,10 +30,6 @@ function isIosUa() {
     return /iPad|iPhone|iPod/i.test(navigator.userAgent || '');
 }
 
-function isNavigableUrl(value) {
-    return /^https?:\/\//i.test(String(value || '').trim());
-}
-
 function customShareItem(platform, target, storedQr, note, openPath) {
     return {
         platform,
@@ -178,16 +174,6 @@ function renderCustomBuild(item) {
     }
     dlInstallBtn.style.display = 'none';
     dlHint.textContent = item.note || 'Quét mã QR bằng camera của thiết bị.';
-}
-
-function redirectUrlForDevice() {
-    if (isIosUa() && builds.ios && builds.ios.isCustom && isNavigableUrl(builds.ios.customTarget)) {
-        return builds.ios.customTarget;
-    }
-    if (isAndroidUa() && builds.android && builds.android.isCustom && isNavigableUrl(builds.android.customTarget)) {
-        return builds.android.customTarget;
-    }
-    return '';
 }
 
 async function renderBuild(item) {
@@ -382,12 +368,6 @@ async function init() {
                     builds.android.buildNumber = shareMeta.androidBuildNumber;
                 }
             }
-        }
-
-        const redirectUrl = redirectUrlForDevice();
-        if (redirectUrl) {
-            window.location.replace(redirectUrl);
-            return;
         }
 
         if (!builds.ios && !builds.android) {

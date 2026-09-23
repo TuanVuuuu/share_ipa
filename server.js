@@ -963,15 +963,6 @@ app.get('/dl', async (req, res) => {
                 const product = share.productId ? products.find((item) => item.id === share.productId) : null;
                 const visibility = await readAppVisibility();
                 vpnOgBlocked = productNeedsVpn(product, visibility);
-                const platform = uaPlatform(req);
-                const customTarget = platform === 'android'
-                    ? share.androidCustomTarget
-                    : platform === 'ios'
-                        ? share.iosCustomTarget
-                        : '';
-                if (isNavigableCustomUrl(customTarget) && !(vpnOgBlocked && !hasVpnAccess(req))) {
-                    return res.redirect(customTarget);
-                }
             }
         } catch (_) { /* giữ query gốc */ }
     }
@@ -1638,13 +1629,6 @@ async function removeSharesForProduct(productId, commitMessage) {
 
 function isNavigableCustomUrl(value) {
     return /^https?:\/\//i.test(String(value || '').trim());
-}
-
-function uaPlatform(req) {
-    const ua = (req.get('user-agent') || '').toString();
-    if (/Android/i.test(ua)) return 'android';
-    if (/iPad|iPhone|iPod/i.test(ua)) return 'ios';
-    return '';
 }
 
 async function customQrDataUrl(text) {
