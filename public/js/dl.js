@@ -34,13 +34,14 @@ function isNavigableUrl(value) {
     return /^https?:\/\//i.test(String(value || '').trim());
 }
 
-function customShareItem(platform, target, storedQr, note) {
+function customShareItem(platform, target, storedQr, note, openPath) {
     return {
         platform,
         isCustom: true,
         customTarget: target || '',
         storedQr: storedQr || '',
         note: note || '',
+        openPath: openPath || '',
         shareUrl: '',
         downloadUrl: '',
     };
@@ -168,6 +169,13 @@ function renderCustomBuild(item) {
     renderQr(item.customTarget, item.storedQr);
     dlHowto.style.display = 'none';
     resetInstallButton();
+    if (item.openPath) {
+        dlInstallBtn.style.display = '';
+        dlInstallBtn.href = item.openPath;
+        dlInstallBtn.textContent = 'Truy cập ngay';
+        dlHint.textContent = item.note || 'Quét mã QR hoặc nhấn Truy cập ngay.';
+        return;
+    }
     dlInstallBtn.style.display = 'none';
     dlHint.textContent = item.note || 'Quét mã QR bằng camera của thiết bị.';
 }
@@ -293,6 +301,8 @@ async function init() {
     let androidQr = '';
     let iosNote = '';
     let androidNote = '';
+    let iosOpenPath = '';
+    let androidOpenPath = '';
 
     if (shareId) {
         try {
@@ -314,6 +324,8 @@ async function init() {
             androidQr = data.item.androidQr || '';
             iosNote = data.item.iosNote || '';
             androidNote = data.item.androidNote || '';
+            if (data.item.iosCanOpen) iosOpenPath = `/dl/go?s=${encodeURIComponent(shareId)}&platform=ios`;
+            if (data.item.androidCanOpen) androidOpenPath = `/dl/go?s=${encodeURIComponent(shareId)}&platform=android`;
             if (!iosCustom && (data.item.iosCustom || iosQr)) iosCustom = 'qr';
             if (!androidCustom && (data.item.androidCustom || androidQr)) androidCustom = 'qr';
             productTitle = data.item.productName || '';
@@ -354,8 +366,8 @@ async function init() {
             else builds.ios = item;
         }
 
-        if (iosCustom) builds.ios = customShareItem('ios', iosCustom === 'qr' ? '' : iosCustom, iosQr, iosNote);
-        if (androidCustom) builds.android = customShareItem('android', androidCustom === 'qr' ? '' : androidCustom, androidQr, androidNote);
+        if (iosCustom) builds.ios = customShareItem('ios', iosCustom === 'qr' ? '' : iosCustom, iosQr, iosNote, iosOpenPath);
+        if (androidCustom) builds.android = customShareItem('android', androidCustom === 'qr' ? '' : androidCustom, androidQr, androidNote, androidOpenPath);
 
         if (shareMeta) {
             if (builds.ios && !builds.ios.isCustom) {

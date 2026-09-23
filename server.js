@@ -919,6 +919,30 @@ app.get('/download/detail', (req, res) => {
     sendHtmlWithOg(res, 'download.html', og);
 });
 
+app.get('/dl/go', async (req, res) => {
+    const shareId = (req.query.s || '').toString().trim();
+    const platform = (req.query.platform || '').toString().trim().toLowerCase();
+    if (!shareId || (platform !== 'ios' && platform !== 'android')) {
+        return res.status(400).send('Liên kết không hợp lệ.');
+    }
+    try {
+        const shares = await readJsonArrayFile(DOWNLOAD_SHARES_PATH);
+        const share = shares.find(item => item.id === shareId);
+        if (!share) return res.status(404).send('Không tìm thấy link chia sẻ.');
+        const products = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
+        const product = share.productId ? products.find(item => item.id === share.productId) : null;
+        const visibility = await readAppVisibility();
+        if (productNeedsVpn(product, visibility) && !hasVpnAccess(req)) {
+            return res.redirect(`/dl?s=${encodeURIComponent(shareId)}`);
+        }
+        const target = platform === 'android' ? share.androidCustomTarget : share.iosCustomTarget;
+        if (!isNavigableCustomUrl(target)) return res.status(404).send('Không có liên kết để mở.');
+        return res.redirect(target);
+    } catch (err) {
+        return res.status(500).send('Không mở được liên kết.');
+    }
+});
+
 // Trang public đối tác: /dl?s=<shareId> hoặc /dl?ios=<id>&android=<id>
 app.get('/dl', async (req, res) => {
     const shareId = (req.query.s || '').toString().trim();
@@ -1674,10 +1698,12 @@ async function publicPartnerShare(s) {
     if (view.iosCustomTarget) {
         view.iosQr = await customQrDataUrl(view.iosCustomTarget);
         view.iosCustom = true;
+        view.iosCanOpen = isNavigableCustomUrl(view.iosCustomTarget);
     }
     if (view.androidCustomTarget) {
         view.androidQr = await customQrDataUrl(view.androidCustomTarget);
         view.androidCustom = true;
+        view.androidCanOpen = isNavigableCustomUrl(view.androidCustomTarget);
     }
     view.iosCustomTarget = null;
     view.androidCustomTarget = null;

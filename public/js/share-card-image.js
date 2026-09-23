@@ -353,13 +353,14 @@
         const customTarget = platform === 'android' ? share.androidCustomTarget : share.iosCustomTarget;
         if (customTarget) {
             const note = String((platform === 'android' ? share.androidNote : share.iosNote) || '').replace(/\s+/g, ' ').trim();
+            const canOpen = /^https?:\/\//i.test(customTarget);
             return {
                 platform,
                 version: null,
                 buildNumber: null,
                 qrUrl: customTarget,
                 scanLabel: 'Quét mã QR',
-                installLabel: 'Quét mã QR',
+                installLabel: canOpen ? 'Truy cập ngay' : 'Quét mã QR',
                 versionLabel: 'QR',
                 showHowto: false,
                 note,
