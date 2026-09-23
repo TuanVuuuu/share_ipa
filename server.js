@@ -1639,6 +1639,13 @@ function readCustomTarget(raw) {
     return { value: text };
 }
 
+function readShareNote(raw) {
+    const text = (raw || '').toString().trim();
+    if (!text) return { value: null };
+    if (text.length > 300) return { error: 'Ghi chú quá dài (tối đa 300 ký tự).' };
+    return { value: text };
+}
+
 function publicShare(s) {
     return withCurrentPublicUrls({
         id: s.id,
@@ -1650,6 +1657,8 @@ function publicShare(s) {
         androidBuildId: s.androidBuildId || null,
         iosCustomTarget: s.iosCustomTarget || null,
         androidCustomTarget: s.androidCustomTarget || null,
+        iosNote: s.iosNote || null,
+        androidNote: s.androidNote || null,
         iosVersion: s.iosVersion || null,
         iosBuildNumber: s.iosBuildNumber || null,
         androidVersion: s.androidVersion || null,
@@ -2234,8 +2243,13 @@ app.post('/api/download-shares', requirePermission('create_download_link'), asyn
         const productId = (req.body?.productId || '').toString().trim();
         const iosCustom = readCustomTarget(req.body?.iosCustomTarget);
         const androidCustom = readCustomTarget(req.body?.androidCustomTarget);
-        if (iosCustom.error || androidCustom.error) {
-            return res.status(400).json({ success: false, message: iosCustom.error || androidCustom.error });
+        const iosNote = readShareNote(iosCustom.value ? req.body?.iosNote : '');
+        const androidNote = readShareNote(androidCustom.value ? req.body?.androidNote : '');
+        if (iosCustom.error || androidCustom.error || iosNote.error || androidNote.error) {
+            return res.status(400).json({
+                success: false,
+                message: iosCustom.error || androidCustom.error || iosNote.error || androidNote.error,
+            });
         }
         const iosBuildId = iosCustom.value ? null : ((req.body?.iosBuildId || '').toString().trim() || null);
         const androidBuildId = androidCustom.value ? null : ((req.body?.androidBuildId || '').toString().trim() || null);
@@ -2278,6 +2292,8 @@ app.post('/api/download-shares', requirePermission('create_download_link'), asyn
             androidBuildId,
             iosCustomTarget: iosCustom.value,
             androidCustomTarget: androidCustom.value,
+            iosNote: iosNote.value,
+            androidNote: androidNote.value,
             iosVersion: iosBuild ? iosBuild.version : null,
             iosBuildNumber: iosBuild ? iosBuild.buildNumber : null,
             androidVersion: androidBuild ? androidBuild.version : null,

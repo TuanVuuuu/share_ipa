@@ -125,6 +125,7 @@
             versionLabel,
             showHowto,
             footerHint,
+            note,
         } = options;
 
         const headerH = 280;
@@ -133,7 +134,7 @@
         const cardW = WIDTH - 32;
         const cardX = 16;
         const iosHowto = showHowto != null ? !!showHowto : platform === 'ios';
-        const cardH = iosHowto ? 430 : 390;
+        const cardH = (iosHowto ? 430 : 390) + (note ? 40 : 0);
         const height = cardTop + cardH + 32;
 
         const canvas = document.createElement('canvas');
@@ -351,6 +352,7 @@
     function shareCardJob(platform, share, build) {
         const customTarget = platform === 'android' ? share.androidCustomTarget : share.iosCustomTarget;
         if (customTarget) {
+            const note = String((platform === 'android' ? share.androidNote : share.iosNote) || '').replace(/\s+/g, ' ').trim();
             return {
                 platform,
                 version: null,
@@ -360,7 +362,8 @@
                 installLabel: 'Quét mã QR',
                 versionLabel: 'QR',
                 showHowto: false,
-                footerHint: 'Quét mã QR bằng camera của thiết bị.',
+                note,
+                footerHint: note || 'Quét mã QR bằng camera của thiết bị.',
             };
         }
         return {
@@ -408,6 +411,7 @@
                 versionLabel: job.versionLabel,
                 showHowto: job.showHowto,
                 footerHint: job.footerHint,
+                note: job.note,
             });
             const ver = job.version || (job.versionLabel ? 'link' : 'x');
             const bn = job.buildNumber != null ? `-${job.buildNumber}` : '';

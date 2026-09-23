@@ -16,6 +16,8 @@ const iosSource = document.getElementById('ios-source');
 const androidSource = document.getElementById('android-source');
 const iosCustomInput = document.getElementById('ios-custom');
 const androidCustomInput = document.getElementById('android-custom');
+const iosNoteInput = document.getElementById('ios-note');
+const androidNoteInput = document.getElementById('android-note');
 const iosHint = document.getElementById('ios-hint');
 const androidHint = document.getElementById('android-hint');
 const shareLinkInput = document.getElementById('share-link-input');
@@ -220,25 +222,28 @@ function platformShareLabel(name, version, buildNumber, customTarget) {
     return `${name} —`;
 }
 
-function syncPlatformSource(sourceEl, selectEl, inputEl, hintEl) {
+function syncPlatformSource(sourceEl, selectEl, inputEl, noteEl, hintEl) {
     const custom = sourceEl.value === 'custom';
     selectEl.hidden = custom;
     inputEl.hidden = !custom;
+    noteEl.hidden = !custom;
     if (custom) {
-        hintEl.textContent = 'QR mã hóa đúng nội dung này. Nếu là URL http(s), thiết bị đúng nền tảng sẽ mở link khi vào trang chia sẻ.';
+        hintEl.textContent = 'QR mã hóa đúng nội dung này. Ghi chú hiện cho người mở link, không kèm URL/text.';
         return;
     }
     hintEl.textContent = hintEl.dataset.buildHint || '';
 }
 
-function readPlatformChoice(sourceEl, selectEl, inputEl, label) {
+function readPlatformChoice(sourceEl, selectEl, inputEl, noteEl, label) {
     if (sourceEl.value !== 'custom') {
-        return { buildId: selectEl.value || null, customTarget: null };
+        return { buildId: selectEl.value || null, customTarget: null, note: null };
     }
     const text = inputEl.value.trim();
     if (!text) return { error: `Nhập URL hoặc text cho ${label}.` };
     if (text.length > 1200) return { error: `${label} quá dài (tối đa 1200 ký tự).` };
-    return { buildId: null, customTarget: text };
+    const note = noteEl.value.trim();
+    if (note.length > 300) return { error: `Ghi chú ${label} quá dài (tối đa 300 ký tự).` };
+    return { buildId: null, customTarget: text, note: note || null };
 }
 
 function setLatestShare(url) {
@@ -497,9 +502,14 @@ async function loadSavedShares(productId) {
             row.className = 'dl-saved-row';
             const iosLabel = platformShareLabel('iOS', share.iosVersion, share.iosBuildNumber, share.iosCustomTarget);
             const andLabel = platformShareLabel('Android', share.androidVersion, share.androidBuildNumber, share.androidCustomTarget);
+            const noteLine = [
+                share.iosNote ? `iOS: ${share.iosNote}` : '',
+                share.androidNote ? `Android: ${share.androidNote}` : '',
+            ].filter(Boolean).join(' · ');
             row.innerHTML = `
                 <div class="dl-saved-info">
                     <strong>${escapeHtml(iosLabel)} · ${escapeHtml(andLabel)}</strong>
+                    ${noteLine ? `<p>${escapeHtml(noteLine)}</p>` : ''}
                     <p>${escapeHtml(share.createdBy || '')} · ${escapeHtml(formatDateTime(share.createdAt))}</p>
                     <input type="text" readonly value="${escapeHtml(share.shareUrl)}" class="dl-saved-url">
                 </div>
@@ -585,10 +595,12 @@ async function showPick(productId) {
         androidSource.value = 'build';
         iosCustomInput.value = '';
         androidCustomInput.value = '';
+        iosNoteInput.value = '';
+        androidNoteInput.value = '';
         fillSelect(iosSelect, data.ios || [], iosHint, currentProduct.iosBundleId ? 'Chưa có bản iOS trong catalog' : 'Chưa cấu hình bundle iOS');
         fillSelect(androidSelect, data.android || [], androidHint, currentProduct.androidBundleId ? 'Chưa có bản Android trong catalog' : 'Chưa cấu hình package Android');
-        syncPlatformSource(iosSource, iosSelect, iosCustomInput, iosHint);
-        syncPlatformSource(androidSource, androidSelect, androidCustomInput, androidHint);
+        syncPlatformSource(iosSource, iosSelect, iosCustomInput, iosNoteInput, iosHint);
+        syncPlatformSource(androidSource, androidSelect, androidCustomInput, androidNoteInput, androidHint);
         setLatestShare('');
         saveShareHint.textContent = '';
         document.title = `${currentProduct.name} — Tạo link tải`;
@@ -647,8 +659,8 @@ async function saveProduct() {
 
 async function saveShare() {
     if (!currentProduct) return;
-    const iosChoice = readPlatformChoice(iosSource, iosSelect, iosCustomInput, 'iOS');
-    const androidChoice = readPlatformChoice(androidSource, androidSelect, androidCustomInput, 'Android');
+    const iosChoice = readPlatformChoice(iosSource, iosSelect, iosCustomInput, iosNoteInput, 'iOS');
+    const androidChoice = readPlatformChoice(androidSource, androidSelect, androidCustomInput, androidNoteInput, 'Android');
     if (iosChoice.error || androidChoice.error) {
         saveShareHint.textContent = iosChoice.error || androidChoice.error;
         return;
@@ -673,6 +685,8 @@ async function saveShare() {
                 androidBuildId: androidChoice.buildId,
                 iosCustomTarget: iosChoice.customTarget,
                 androidCustomTarget: androidChoice.customTarget,
+                iosNote: iosChoice.note,
+                androidNote: androidChoice.note,
             }),
         });
         const data = await res.json();
@@ -779,8 +793,8 @@ toggleCreateBtn.addEventListener('click', () => {
 productSaveBtn.addEventListener('click', saveProduct);
 productCancelBtn.addEventListener('click', resetAdminForm);
 saveShareBtn.addEventListener('click', saveShare);
-iosSource.addEventListener('change', () => syncPlatformSource(iosSource, iosSelect, iosCustomInput, iosHint));
-androidSource.addEventListener('change', () => syncPlatformSource(androidSource, androidSelect, androidCustomInput, androidHint));
+iosSource.addEventListener('change', () => syncPlatformSource(iosSource, iosSelect, iosCustomInput, iosNoteInput, iosHint));
+androidSource.addEventListener('change', () => syncPlatformSource(androidSource, androidSelect, androidCustomInput, androidNoteInput, androidHint));
 
 if (pickVisibilityBtn) {
     pickVisibilityBtn.addEventListener('click', async () => {

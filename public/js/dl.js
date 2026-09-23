@@ -34,12 +34,13 @@ function isNavigableUrl(value) {
     return /^https?:\/\//i.test(String(value || '').trim());
 }
 
-function customShareItem(platform, target, storedQr) {
+function customShareItem(platform, target, storedQr, note) {
     return {
         platform,
         isCustom: true,
         customTarget: target || '',
         storedQr: storedQr || '',
+        note: note || '',
         shareUrl: '',
         downloadUrl: '',
     };
@@ -168,7 +169,7 @@ function renderCustomBuild(item) {
     dlHowto.style.display = 'none';
     resetInstallButton();
     dlInstallBtn.style.display = 'none';
-    dlHint.textContent = 'Quét mã QR bằng camera của thiết bị.';
+    dlHint.textContent = item.note || 'Quét mã QR bằng camera của thiết bị.';
 }
 
 function redirectUrlForDevice() {
@@ -290,6 +291,8 @@ async function init() {
     let androidCustom = '';
     let iosQr = '';
     let androidQr = '';
+    let iosNote = '';
+    let androidNote = '';
 
     if (shareId) {
         try {
@@ -309,6 +312,8 @@ async function init() {
             androidCustom = data.item.androidCustomTarget || '';
             iosQr = data.item.iosQr || '';
             androidQr = data.item.androidQr || '';
+            iosNote = data.item.iosNote || '';
+            androidNote = data.item.androidNote || '';
             if (!iosCustom && (data.item.iosCustom || iosQr)) iosCustom = 'qr';
             if (!androidCustom && (data.item.androidCustom || androidQr)) androidCustom = 'qr';
             productTitle = data.item.productName || '';
@@ -349,8 +354,8 @@ async function init() {
             else builds.ios = item;
         }
 
-        if (iosCustom) builds.ios = customShareItem('ios', iosCustom === 'qr' ? '' : iosCustom, iosQr);
-        if (androidCustom) builds.android = customShareItem('android', androidCustom === 'qr' ? '' : androidCustom, androidQr);
+        if (iosCustom) builds.ios = customShareItem('ios', iosCustom === 'qr' ? '' : iosCustom, iosQr, iosNote);
+        if (androidCustom) builds.android = customShareItem('android', androidCustom === 'qr' ? '' : androidCustom, androidQr, androidNote);
 
         if (shareMeta) {
             if (builds.ios && !builds.ios.isCustom) {
