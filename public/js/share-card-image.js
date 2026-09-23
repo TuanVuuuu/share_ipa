@@ -45,11 +45,22 @@
         ctx.closePath();
     }
 
-    function createQrCanvas(text, size) {
+    function makeQr(text) {
         if (!text || typeof qrcode !== 'function') return null;
-        const qr = qrcode(0, 'H');
-        qr.addData(text);
-        qr.make();
+        for (const level of ['H', 'M', 'L']) {
+            try {
+                const qr = qrcode(0, level);
+                qr.addData(text);
+                qr.make();
+                return qr;
+            } catch (_) { /* nội dung dài hơn mức ECC hiện tại */ }
+        }
+        return null;
+    }
+
+    function createQrCanvas(text, size) {
+        const qr = makeQr(text);
+        if (!qr) return null;
         const moduleCount = qr.getModuleCount();
         const cell = Math.floor(size / moduleCount);
         const qrSize = cell * moduleCount;
@@ -109,6 +120,11 @@
             version,
             buildNumber,
             qrUrl,
+            scanLabel,
+            installLabel,
+            versionLabel,
+            showHowto,
+            footerHint,
         } = options;
 
         const headerH = 280;
@@ -116,7 +132,7 @@
         const cardPadX = 22;
         const cardW = WIDTH - 32;
         const cardX = 16;
-        const iosHowto = platform === 'ios';
+        const iosHowto = showHowto != null ? !!showHowto : platform === 'ios';
         const cardH = iosHowto ? 430 : 390;
         const height = cardTop + cardH + 32;
 
@@ -208,7 +224,7 @@
         ctx.font = '600 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         ctx.fillStyle = PRIMARY;
         ctx.textAlign = 'center';
-        ctx.fillText('Quét để tải', centerX, y);
+        ctx.fillText(scanLabel || 'Quét để tải', centerX, y);
         y += 30;
 
         const qrSize = 220;
@@ -236,7 +252,7 @@
         const bn = buildNumber != null ? ` (${buildNumber})` : '';
         ctx.font = '600 16px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         ctx.fillStyle = TEXT;
-        const versionText = `Version ${ver}${bn}`;
+        const versionText = versionLabel || `Version ${ver}${bn}`;
         const versionW = ctx.measureText(versionText).width;
         const badgeText = platform;
         ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
@@ -259,7 +275,7 @@
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('Cài đặt ngay', centerX, y + btnH / 2);
+        ctx.fillText(installLabel || 'Cài đặt ngay', centerX, y + btnH / 2);
         y += btnH + 16;
 
         if (iosHowto) {
@@ -286,9 +302,9 @@
         ctx.font = '13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         ctx.fillStyle = MUTED;
         ctx.textAlign = 'center';
-        const hint = platform === 'android'
+        const hint = footerHint || (platform === 'android'
             ? 'Mở trang này trên thiết bị Android, hoặc quét QR bằng điện thoại.'
-            : 'Mở trang này trên iPhone/iPad, hoặc quét QR bằng Camera.';
+            : 'Mở trang này trên iPhone/iPad, hoặc quét QR bằng Camera.');
         wrapText(ctx, hint, centerX, y, cardW - cardPadX * 2, 18);
 
         return canvas.toDataURL('image/png');
@@ -332,6 +348,30 @@
         return data.item;
     }
 
+    function shareCardJob(platform, share, build) {
+        const customTarget = platform === 'android' ? share.androidCustomTarget : share.iosCustomTarget;
+        if (customTarget) {
+            return {
+                platform,
+                version: null,
+                buildNumber: null,
+                qrUrl: customTarget,
+                scanLabel: 'Quét mã QR',
+                installLabel: 'Quét mã QR',
+                versionLabel: 'QR',
+                showHowto: false,
+                footerHint: 'Quét mã QR bằng camera của thiết bị.',
+            };
+        }
+        return {
+            platform,
+            version: build?.version || (platform === 'android' ? share.androidVersion : share.iosVersion),
+            buildNumber: build?.buildNumber ?? (platform === 'android' ? share.androidBuildNumber : share.iosBuildNumber),
+            qrUrl: build?.shareUrl || share.shareUrl,
+            showHowto: platform === 'ios',
+        };
+    }
+
     async function downloadShareCardImages(share) {
         if (!share) throw new Error('Thiếu thông tin link.');
 
@@ -343,26 +383,12 @@
         const productName = share.productName || iosBuild?.appName || androidBuild?.appName || 'App';
         const iconUrl = share.productIcon || iosBuild?.icon || androidBuild?.icon || '';
         const bannerUrl = share.productBanner || '';
-        const hasIos = !!(share.iosBuildId || iosBuild);
-        const hasAndroid = !!(share.androidBuildId || androidBuild);
+        const hasIos = !!(share.iosBuildId || share.iosCustomTarget || iosBuild);
+        const hasAndroid = !!(share.androidBuildId || share.androidCustomTarget || androidBuild);
 
         const jobs = [];
-        if (hasIos) {
-            jobs.push({
-                platform: 'ios',
-                version: iosBuild?.version || share.iosVersion,
-                buildNumber: iosBuild?.buildNumber ?? share.iosBuildNumber,
-                qrUrl: iosBuild?.shareUrl || share.shareUrl,
-            });
-        }
-        if (hasAndroid) {
-            jobs.push({
-                platform: 'android',
-                version: androidBuild?.version || share.androidVersion,
-                buildNumber: androidBuild?.buildNumber ?? share.androidBuildNumber,
-                qrUrl: androidBuild?.shareUrl || share.shareUrl,
-            });
-        }
+        if (hasIos) jobs.push(shareCardJob('ios', share, iosBuild));
+        if (hasAndroid) jobs.push(shareCardJob('android', share, androidBuild));
         if (!jobs.length) throw new Error('Link này chưa có bản iOS hoặc Android.');
 
         for (let i = 0; i < jobs.length; i++) {
@@ -377,8 +403,13 @@
                 version: job.version,
                 buildNumber: job.buildNumber,
                 qrUrl: job.qrUrl,
+                scanLabel: job.scanLabel,
+                installLabel: job.installLabel,
+                versionLabel: job.versionLabel,
+                showHowto: job.showHowto,
+                footerHint: job.footerHint,
             });
-            const ver = job.version || 'x';
+            const ver = job.version || (job.versionLabel ? 'link' : 'x');
             const bn = job.buildNumber != null ? `-${job.buildNumber}` : '';
             triggerDownload(
                 dataUrl,

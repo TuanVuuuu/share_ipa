@@ -13,6 +13,7 @@ const dlPlatformBadge = document.getElementById('dl-platform-badge');
 const dlInstallBtn = document.getElementById('dl-install-btn');
 const dlHowto = document.getElementById('dl-howto');
 const dlHint = document.getElementById('dl-hint');
+const dlScanLabel = document.getElementById('dl-scan-label');
 const tabIos = document.getElementById('tab-ios');
 const tabAndroid = document.getElementById('tab-android');
 
@@ -27,6 +28,43 @@ function isAndroidUa() {
 
 function isIosUa() {
     return /iPad|iPhone|iPod/i.test(navigator.userAgent || '');
+}
+
+function isNavigableUrl(value) {
+    return /^https?:\/\//i.test(String(value || '').trim());
+}
+
+function customShareItem(platform, target, storedQr) {
+    return {
+        platform,
+        isCustom: true,
+        customTarget: target || '',
+        storedQr: storedQr || '',
+        shareUrl: '',
+        downloadUrl: '',
+    };
+}
+
+function makeQr(data) {
+    if (!data || typeof qrcode !== 'function') return null;
+    for (const level of ['H', 'M', 'L']) {
+        try {
+            const qr = qrcode(0, level);
+            qr.addData(data);
+            qr.make();
+            return qr;
+        } catch (_) { /* nội dung dài hơn mức ECC hiện tại */ }
+    }
+    return null;
+}
+
+function resetInstallButton() {
+    dlInstallBtn.onclick = null;
+    dlInstallBtn.textContent = 'Cài đặt ngay';
+}
+
+function setScanLabel(text) {
+    if (dlScanLabel) dlScanLabel.textContent = text;
 }
 
 function setCategoryTitle(name) {
@@ -67,10 +105,8 @@ function renderQr(shareUrl, storedQr) {
     wrap.className = 'dl-qr-wrap';
 
     // Dùng error correction H để vẫn quét được khi có logo giữa QR
-    if (shareUrl && typeof qrcode === 'function') {
-        const qr = qrcode(0, 'H');
-        qr.addData(shareUrl);
-        qr.make();
+    const qr = shareUrl ? makeQr(shareUrl) : null;
+    if (qr) {
         wrap.innerHTML = qr.createImgTag(6, 8);
         const img = wrap.querySelector('img');
         if (img) {
@@ -122,17 +158,50 @@ function currentHostUrl(value) {
     return value.replace(/share-ipa\.vunt\.info/g, window.location.host);
 }
 
+function renderCustomBuild(item) {
+    const platform = item.platform || activePlatform || 'ios';
+    setScanLabel('Quét mã QR');
+    dlVersion.textContent = 'QR';
+    dlPlatformBadge.textContent = platform;
+    dlPlatformBadge.className = `build-tag ${platform === 'android' ? 'build-tag-android' : 'build-tag-ios'}`;
+    renderQr(item.customTarget, item.storedQr);
+    dlHowto.style.display = 'none';
+    resetInstallButton();
+    dlInstallBtn.style.display = 'none';
+    dlHint.textContent = 'Quét mã QR bằng camera của thiết bị.';
+}
+
+function redirectUrlForDevice() {
+    if (isIosUa() && builds.ios && builds.ios.isCustom && isNavigableUrl(builds.ios.customTarget)) {
+        return builds.ios.customTarget;
+    }
+    if (isAndroidUa() && builds.android && builds.android.isCustom && isNavigableUrl(builds.android.customTarget)) {
+        return builds.android.customTarget;
+    }
+    return '';
+}
+
 async function renderBuild(item) {
     if (!item) {
+        setScanLabel('Quét để tải');
         dlVersion.textContent = 'Chưa có bản cho nền tảng này';
         dlPlatformBadge.textContent = activePlatform || '';
         dlPlatformBadge.className = `build-tag ${activePlatform === 'android' ? 'build-tag-android' : 'build-tag-ios'}`;
+        resetInstallButton();
         dlInstallBtn.style.display = 'none';
         dlHowto.style.display = 'none';
         dlQr.innerHTML = '';
         dlHint.textContent = '';
         return;
     }
+
+    if (item.isCustom) {
+        renderCustomBuild(item);
+        return;
+    }
+
+    setScanLabel('Quét để tải');
+    resetInstallButton();
 
     if (categoryName) setCategoryTitle(categoryName);
 
@@ -217,6 +286,10 @@ async function init() {
     let productBanner = '';
     let productIcon = '';
     let shareMeta = null;
+    let iosCustom = '';
+    let androidCustom = '';
+    let iosQr = '';
+    let androidQr = '';
 
     if (shareId) {
         try {
@@ -232,6 +305,12 @@ async function init() {
             shareMeta = data.item;
             iosId = data.item.iosBuildId || '';
             androidId = data.item.androidBuildId || '';
+            iosCustom = data.item.iosCustomTarget || '';
+            androidCustom = data.item.androidCustomTarget || '';
+            iosQr = data.item.iosQr || '';
+            androidQr = data.item.androidQr || '';
+            if (!iosCustom && (data.item.iosCustom || iosQr)) iosCustom = 'qr';
+            if (!androidCustom && (data.item.androidCustom || androidQr)) androidCustom = 'qr';
             productTitle = data.item.productName || '';
             productBanner = currentHostUrl(data.item.productBanner || '');
             productIcon = currentHostUrl(data.item.productIcon || '');
@@ -247,7 +326,7 @@ async function init() {
         }
     }
 
-    if (!iosId && !androidId) {
+    if (!iosId && !androidId && !iosCustom && !androidCustom) {
         showError('Liên kết không hợp lệ. Thiếu thông tin bản build.');
         setCategoryTitle('');
         setCategoryIcon('');
@@ -270,19 +349,28 @@ async function init() {
             else builds.ios = item;
         }
 
+        if (iosCustom) builds.ios = customShareItem('ios', iosCustom === 'qr' ? '' : iosCustom, iosQr);
+        if (androidCustom) builds.android = customShareItem('android', androidCustom === 'qr' ? '' : androidCustom, androidQr);
+
         if (shareMeta) {
-            if (builds.ios) {
+            if (builds.ios && !builds.ios.isCustom) {
                 if (!builds.ios.version && shareMeta.iosVersion) builds.ios.version = shareMeta.iosVersion;
                 if (builds.ios.buildNumber == null && shareMeta.iosBuildNumber) {
                     builds.ios.buildNumber = shareMeta.iosBuildNumber;
                 }
             }
-            if (builds.android) {
+            if (builds.android && !builds.android.isCustom) {
                 if (!builds.android.version && shareMeta.androidVersion) builds.android.version = shareMeta.androidVersion;
                 if (builds.android.buildNumber == null && shareMeta.androidBuildNumber) {
                     builds.android.buildNumber = shareMeta.androidBuildNumber;
                 }
             }
+        }
+
+        const redirectUrl = redirectUrlForDevice();
+        if (redirectUrl) {
+            window.location.replace(redirectUrl);
+            return;
         }
 
         if (!builds.ios && !builds.android) {

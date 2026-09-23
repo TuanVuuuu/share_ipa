@@ -939,6 +939,15 @@ app.get('/dl', async (req, res) => {
                 const product = share.productId ? products.find((item) => item.id === share.productId) : null;
                 const visibility = await readAppVisibility();
                 vpnOgBlocked = productNeedsVpn(product, visibility);
+                const platform = uaPlatform(req);
+                const customTarget = platform === 'android'
+                    ? share.androidCustomTarget
+                    : platform === 'ios'
+                        ? share.iosCustomTarget
+                        : '';
+                if (isNavigableCustomUrl(customTarget) && !(vpnOgBlocked && !hasVpnAccess(req))) {
+                    return res.redirect(customTarget);
+                }
             }
         } catch (_) { /* giữ query gốc */ }
     }
@@ -1493,7 +1502,7 @@ async function cleanupGithubRefsForApp(bundleId, platform, removedIds) {
                 next.androidBuildNumber = null;
                 sharesChanged = true;
             }
-            if (!next.iosBuildId && !next.androidBuildId) {
+            if (!next.iosBuildId && !next.androidBuildId && !next.iosCustomTarget && !next.androidCustomTarget) {
                 sharesChanged = true;
                 continue;
             }
@@ -1603,6 +1612,33 @@ async function removeSharesForProduct(productId, commitMessage) {
     return removedCount;
 }
 
+function isNavigableCustomUrl(value) {
+    return /^https?:\/\//i.test(String(value || '').trim());
+}
+
+function uaPlatform(req) {
+    const ua = (req.get('user-agent') || '').toString();
+    if (/Android/i.test(ua)) return 'android';
+    if (/iPad|iPhone|iPod/i.test(ua)) return 'ios';
+    return '';
+}
+
+async function customQrDataUrl(text) {
+    if (!text) return null;
+    try {
+        return await QRCode.toDataURL(text, { width: 320, margin: 1, errorCorrectionLevel: 'M' });
+    } catch (_) {
+        return null;
+    }
+}
+
+function readCustomTarget(raw) {
+    const text = (raw || '').toString().trim();
+    if (!text) return { value: null };
+    if (text.length > 1200) return { error: 'Nội dung QR quá dài (tối đa 1200 ký tự).' };
+    return { value: text };
+}
+
 function publicShare(s) {
     return withCurrentPublicUrls({
         id: s.id,
@@ -1612,6 +1648,8 @@ function publicShare(s) {
         productBanner: s.productBanner || null,
         iosBuildId: s.iosBuildId || null,
         androidBuildId: s.androidBuildId || null,
+        iosCustomTarget: s.iosCustomTarget || null,
+        androidCustomTarget: s.androidCustomTarget || null,
         iosVersion: s.iosVersion || null,
         iosBuildNumber: s.iosBuildNumber || null,
         androidVersion: s.androidVersion || null,
@@ -1620,6 +1658,21 @@ function publicShare(s) {
         createdBy: s.createdBy || null,
         shareUrl: `${PUBLIC_BASE_URL}/dl?s=${encodeURIComponent(s.id)}`,
     });
+}
+
+async function publicPartnerShare(s) {
+    const view = publicShare(s);
+    if (view.iosCustomTarget) {
+        view.iosQr = await customQrDataUrl(view.iosCustomTarget);
+        view.iosCustom = true;
+    }
+    if (view.androidCustomTarget) {
+        view.androidQr = await customQrDataUrl(view.androidCustomTarget);
+        view.androidCustom = true;
+    }
+    view.iosCustomTarget = null;
+    view.androidCustomTarget = null;
+    return view;
 }
 
 // Xóa file vật lý của một bản build (R2 object + cache LAN local + bản sao lưu trữ + plist)
@@ -2179,11 +2232,16 @@ app.post('/api/download-shares', requirePermission('create_download_link'), asyn
             return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ nên không thể lưu link.' });
         }
         const productId = (req.body?.productId || '').toString().trim();
-        const iosBuildId = (req.body?.iosBuildId || '').toString().trim() || null;
-        const androidBuildId = (req.body?.androidBuildId || '').toString().trim() || null;
+        const iosCustom = readCustomTarget(req.body?.iosCustomTarget);
+        const androidCustom = readCustomTarget(req.body?.androidCustomTarget);
+        if (iosCustom.error || androidCustom.error) {
+            return res.status(400).json({ success: false, message: iosCustom.error || androidCustom.error });
+        }
+        const iosBuildId = iosCustom.value ? null : ((req.body?.iosBuildId || '').toString().trim() || null);
+        const androidBuildId = androidCustom.value ? null : ((req.body?.androidBuildId || '').toString().trim() || null);
         if (!productId) return res.status(400).json({ success: false, message: 'Thiếu productId.' });
-        if (!iosBuildId && !androidBuildId) {
-            return res.status(400).json({ success: false, message: 'Cần chọn ít nhất một bản iOS hoặc Android.' });
+        if (!iosBuildId && !androidBuildId && !iosCustom.value && !androidCustom.value) {
+            return res.status(400).json({ success: false, message: 'Cần chọn ít nhất một bản hoặc nhập URL/text.' });
         }
 
         const products = await readJsonArrayFile(DOWNLOAD_PRODUCTS_PATH);
@@ -2218,6 +2276,8 @@ app.post('/api/download-shares', requirePermission('create_download_link'), asyn
             productBanner: product.banner || null,
             iosBuildId,
             androidBuildId,
+            iosCustomTarget: iosCustom.value,
+            androidCustomTarget: androidCustom.value,
             iosVersion: iosBuild ? iosBuild.version : null,
             iosBuildNumber: iosBuild ? iosBuild.buildNumber : null,
             androidVersion: androidBuild ? androidBuild.version : null,
@@ -2308,7 +2368,7 @@ app.get('/api/download-shares/:id', async (req, res) => {
             if (!enriched.productBanner) enriched.productBanner = product.banner || null;
         }
 
-        return res.json({ success: true, item: publicShare(enriched) });
+        return res.json({ success: true, item: await publicPartnerShare(enriched) });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }

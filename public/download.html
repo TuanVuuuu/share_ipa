@@ -115,16 +115,26 @@
             </div>
 
             <div class="dl-pick-fields">
-                <label class="dl-field">
-                    <span class="dl-field-label"><span class="build-tag build-tag-ios">iOS</span> Phiên bản</span>
+                <div class="dl-field">
+                    <span class="dl-field-label"><span class="build-tag build-tag-ios">iOS</span> Nguồn</span>
+                    <select id="ios-source" class="dl-select">
+                        <option value="build">Phiên bản có sẵn</option>
+                        <option value="custom">Tạo QR từ URL / text</option>
+                    </select>
                     <select id="ios-select" class="dl-select"></select>
+                    <textarea id="ios-custom" class="dl-select dl-custom-input" rows="2" maxlength="1200" placeholder="https://... hoặc nội dung QR" hidden></textarea>
                     <p class="dl-field-hint" id="ios-hint"></p>
-                </label>
-                <label class="dl-field">
-                    <span class="dl-field-label"><span class="build-tag build-tag-android">Android</span> Phiên bản</span>
+                </div>
+                <div class="dl-field">
+                    <span class="dl-field-label"><span class="build-tag build-tag-android">Android</span> Nguồn</span>
+                    <select id="android-source" class="dl-select">
+                        <option value="build">Phiên bản có sẵn</option>
+                        <option value="custom">Tạo QR từ URL / text</option>
+                    </select>
                     <select id="android-select" class="dl-select"></select>
+                    <textarea id="android-custom" class="dl-select dl-custom-input" rows="2" maxlength="1200" placeholder="https://... hoặc nội dung QR" hidden></textarea>
                     <p class="dl-field-hint" id="android-hint"></p>
-                </label>
+                </div>
             </div>
 
             <div class="dl-share-box">

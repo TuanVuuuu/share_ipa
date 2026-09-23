@@ -1494,6 +1494,12 @@ body.auth-dialog-open > :not(.modal-overlay) {
     background: #f5f5f7;
     color: #86868b;
 }
+.dl-custom-input {
+    min-height: 72px;
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.4;
+}
 .dl-share-box {
     display: flex;
     flex-direction: column;
@@ -1711,6 +1717,8 @@ body.auth-dialog-open > :not(.modal-overlay) {
 .dl-version-text {
     font-size: 16px;
     font-weight: 600;
+    overflow-wrap: anywhere;
+    text-align: center;
 }
 .dl-install-btn {
     width: 100%;
@@ -1892,6 +1900,7 @@ body.auth-dialog-open > :not(.modal-overlay) {
     display: block;
     font-size: 14px;
     margin-bottom: 4px;
+    overflow-wrap: anywhere;
 }
 .dl-saved-info p {
     margin: 0 0 8px;
