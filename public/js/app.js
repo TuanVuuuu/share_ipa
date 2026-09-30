@@ -340,12 +340,18 @@ if (homeView && appDetailView && window.CatalogDetail) {
         detailVpnCheckbox: document.getElementById('detail-vpn-checkbox'),
         detailVpnBadge: document.getElementById('detail-vpn-badge'),
         detailVpnGate: document.getElementById('detail-vpn-gate'),
+        detailPinToggle: document.getElementById('detail-pin-toggle'),
+        detailPinCheckbox: document.getElementById('detail-pin-checkbox'),
+        detailPinBadge: document.getElementById('detail-pin-badge'),
+        detailPinChange: document.getElementById('detail-pin-change'),
         canDeleteBuild: canDeleteBuild,
         canManageApp: isAdmin,
         onDeleteBuild: handleDeleteBuild,
         onToggleVisibility: handleToggleVisibility,
         onDeleteAll: handleDeleteAll,
         onToggleVpn: handleToggleVpn,
+        onTogglePin: handleTogglePin,
+        onChangePin: handleChangePin,
         qrModal: document.getElementById('qr-modal'),
         qrModalClose: document.getElementById('qr-modal-close'),
         qrModalTitle: document.getElementById('qr-modal-title'),
@@ -534,6 +540,7 @@ async function handleToggleVpn(group, vpnRequired) {
                 builds,
                 hidden: group.hidden,
                 vpnRequired,
+                pinRequired: group.pinRequired,
                 vpnAccess: vpnRequired ? vpnAccess : true,
                 vpn: group.vpn || vpnInfo,
             });
@@ -542,6 +549,74 @@ async function handleToggleVpn(group, vpnRequired) {
         alert(err.message);
         const box = document.getElementById('detail-vpn-checkbox');
         if (box) box.checked = !!group.vpnRequired;
+        if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(false);
+    }
+}
+
+async function saveInstallPin(group, pinRequired, pin) {
+    const bundleId = group.latest.bundleId;
+    const platform = group.latest.platform || 'ios';
+    const res = await fetch('/api/catalog/pin-required', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bundleId, platform, pinRequired, pin: pin || '' })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.success) {
+        throw new Error((data && data.message) || 'Cập nhật mã bảo mật thất bại.');
+    }
+    catalogItems = catalogItems.map((item) => {
+        if ((item.bundleId || item.id) === bundleId && (item.platform || 'ios') === platform) {
+            return { ...item, pinRequired };
+        }
+        return item;
+    });
+    renderCatalog(true);
+    const builds = getBuildsForBundle(bundleId, platform);
+    if (builds.length && detailViewCtrl) {
+        detailViewCtrl.renderAppDetail({
+            latest: builds[0],
+            builds,
+            hidden: group.hidden,
+            vpnRequired: group.vpnRequired,
+            pinRequired,
+            vpnAccess: group.vpnRequired ? vpnAccess : true,
+            vpn: group.vpn || vpnInfo,
+        });
+    }
+}
+
+async function handleTogglePin(group, pinRequired) {
+    if (!isAdmin() || !group || !group.latest) return;
+    let pin = '';
+    if (pinRequired) {
+        pin = window.CatalogDetail.askInstallPin('Nhập mã bảo mật 6 số. Người cài đặt sẽ phải nhập mã này.');
+        if (!pin) {
+            const box = document.getElementById('detail-pin-checkbox');
+            if (box) box.checked = false;
+            return;
+        }
+    }
+    if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(true);
+    try {
+        await saveInstallPin(group, pinRequired, pin);
+    } catch (err) {
+        alert(err.message);
+        const box = document.getElementById('detail-pin-checkbox');
+        if (box) box.checked = !!group.pinRequired;
+        if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(false);
+    }
+}
+
+async function handleChangePin(group) {
+    if (!isAdmin() || !group || !group.latest || !group.pinRequired) return;
+    const pin = window.CatalogDetail.askInstallPin('Nhập mã bảo mật 6 số mới.');
+    if (!pin) return;
+    if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(true);
+    try {
+        await saveInstallPin(group, true, pin);
+    } catch (err) {
+        alert(err.message);
         if (detailViewCtrl && detailViewCtrl.setAdminBusy) detailViewCtrl.setAdminBusy(false);
     }
 }

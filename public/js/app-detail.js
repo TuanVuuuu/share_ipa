@@ -20,12 +20,18 @@ const detailView = CatalogDetail.createDetailView({
     detailVpnCheckbox: document.getElementById('detail-vpn-checkbox'),
     detailVpnBadge: document.getElementById('detail-vpn-badge'),
     detailVpnGate: document.getElementById('detail-vpn-gate'),
+    detailPinToggle: document.getElementById('detail-pin-toggle'),
+    detailPinCheckbox: document.getElementById('detail-pin-checkbox'),
+    detailPinBadge: document.getElementById('detail-pin-badge'),
+    detailPinChange: document.getElementById('detail-pin-change'),
     canDeleteBuild: () => isAdminUser,
     canManageApp: () => isAdminUser,
     onDeleteBuild: handleDeleteBuild,
     onToggleVisibility: handleToggleVisibility,
     onDeleteAll: handleDeleteAll,
     onToggleVpn: handleToggleVpn,
+    onTogglePin: handleTogglePin,
+    onChangePin: handleChangePin,
     qrModal: document.getElementById('qr-modal'),
     qrModalClose: document.getElementById('qr-modal-close'),
     qrModalTitle: document.getElementById('qr-modal-title'),
@@ -64,6 +70,7 @@ function currentGroupFromBuilds(builds, extra) {
         builds,
         hidden: !!flags.hidden,
         vpnRequired: !!flags.vpnRequired,
+        pinRequired: !!flags.pinRequired,
         vpnAccess: !!flags.vpnAccess,
         vpn: flags.vpn || null,
     };
@@ -96,6 +103,7 @@ async function handleToggleVisibility(group) {
         detailView.renderAppDetail(currentGroupFromBuilds(builds, {
             hidden: nextHidden,
             vpnRequired: group.vpnRequired,
+            pinRequired: group.pinRequired,
             vpnAccess: group.vpnAccess,
             vpn: group.vpn,
         }));
@@ -124,6 +132,7 @@ async function handleToggleVpn(group, vpnRequired) {
         detailView.renderAppDetail(currentGroupFromBuilds(builds, {
             hidden: group.hidden,
             vpnRequired,
+            pinRequired: group.pinRequired,
             vpnAccess: vpnRequired ? sessionVpnAccess : true,
             vpn: group.vpn,
         }));
@@ -131,6 +140,63 @@ async function handleToggleVpn(group, vpnRequired) {
         alert(err.message);
         const box = document.getElementById('detail-vpn-checkbox');
         if (box) box.checked = !!group.vpnRequired;
+        detailView.setAdminBusy(false);
+    }
+}
+
+async function saveInstallPin(group, pinRequired, pin) {
+    const bundleId = group.latest.bundleId;
+    const platform = group.latest.platform || 'ios';
+    const res = await fetch('/api/catalog/pin-required', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bundleId, platform, pinRequired, pin: pin || '' })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.success) {
+        throw new Error((data && data.message) || 'Cập nhật mã bảo mật thất bại.');
+    }
+    const builds = (group.builds || []).map((item) => ({ ...item, pinRequired }));
+    detailView.renderAppDetail(currentGroupFromBuilds(builds, {
+        hidden: group.hidden,
+        vpnRequired: group.vpnRequired,
+        pinRequired,
+        vpnAccess: group.vpnAccess,
+        vpn: group.vpn,
+    }));
+}
+
+async function handleTogglePin(group, pinRequired) {
+    if (!isAdminUser || !group || !group.latest) return;
+    let pin = '';
+    if (pinRequired) {
+        pin = window.CatalogDetail.askInstallPin('Nhập mã bảo mật 6 số. Người cài đặt sẽ phải nhập mã này.');
+        if (!pin) {
+            const box = document.getElementById('detail-pin-checkbox');
+            if (box) box.checked = false;
+            return;
+        }
+    }
+    detailView.setAdminBusy(true);
+    try {
+        await saveInstallPin(group, pinRequired, pin);
+    } catch (err) {
+        alert(err.message);
+        const box = document.getElementById('detail-pin-checkbox');
+        if (box) box.checked = !!group.pinRequired;
+        detailView.setAdminBusy(false);
+    }
+}
+
+async function handleChangePin(group) {
+    if (!isAdminUser || !group || !group.latest || !group.pinRequired) return;
+    const pin = window.CatalogDetail.askInstallPin('Nhập mã bảo mật 6 số mới.');
+    if (!pin) return;
+    detailView.setAdminBusy(true);
+    try {
+        await saveInstallPin(group, true, pin);
+    } catch (err) {
+        alert(err.message);
         detailView.setAdminBusy(false);
     }
 }
@@ -225,6 +291,7 @@ async function loadAppDetail() {
         detailView.renderAppDetail(currentGroupFromBuilds(builds, {
             hidden: data.hidden,
             vpnRequired: data.vpnRequired,
+            pinRequired: data.pinRequired,
             vpnAccess: data.vpnAccess != null ? !!data.vpnAccess : sessionVpnAccess,
             vpn: data.vpn || sessionVpn,
         }));

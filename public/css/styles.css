@@ -608,6 +608,64 @@ body.auth-dialog-open > :not(.modal-overlay) {
     height: 16px;
     accent-color: #1d4ed8;
 }
+.detail-pin-badge {
+    display: inline-block;
+    margin-left: 6px;
+    background: #f3e8ff;
+    color: #7e22ce;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-weight: 600;
+    font-size: 11px;
+    vertical-align: middle;
+}
+.app-card-info .detail-pin-badge {
+    margin: 2px 0 4px;
+    margin-left: 0;
+}
+.pin-check-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-top: 8px;
+}
+.pin-check-row .vpn-check {
+    margin-top: 0;
+}
+.pin-change {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.pin-change:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+.vpn-gate .pin-gate-help {
+    color: #6b7280;
+    font-size: 14px;
+    margin: 0;
+}
+.pin-gate-input {
+    width: 100%;
+    margin-top: 16px;
+    padding: 12px 14px;
+    font-size: 22px;
+    letter-spacing: 0.35em;
+    text-align: center;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.pin-gate-input:focus {
+    outline: 2px solid #bfdbfe;
+    border-color: #1d4ed8;
+}
 .vpn-gate-wrap {
     margin: 12px 0 8px;
 }

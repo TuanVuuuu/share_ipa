@@ -23,7 +23,7 @@ const CATALOG_IOS_PATH = 'catalog-ios.json';         // Danh mục riêng cho iO
 const CATALOG_ANDROID_PATH = 'catalog-android.json'; // Danh mục riêng cho Android
 const DOWNLOAD_PRODUCTS_PATH = 'download-products.json'; // Mục download do admin tạo (tên + bundle)
 const DOWNLOAD_SHARES_PATH = 'download-shares.json';     // Link do tester tạo và lưu
-const APP_VISIBILITY_PATH = 'app-visibility.json';       // Ẩn/hiện + khoá nội bộ (vpnRequired) theo platform + bundleId (admin)
+const APP_VISIBILITY_PATH = 'app-visibility.json';       // Ẩn/hiện, khoá VPN và mã cài đặt theo platform + bundleId (admin)
 const VPN_PORTAL_URL = (process.env.VPN_PORTAL_URL || '').trim();
 const VPN_CHECK_URL = (process.env.VPN_CHECK_URL || 'http://10.110.131.11:8080').trim();
 const VPN_GRANT_TTL_SEC = Math.max(10, Number(process.env.VPN_GRANT_TTL_SEC) || 30);
@@ -38,7 +38,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '70';
+const ASSET_VERSION = process.env.ASSET_VERSION || '71';
 const APP_HOME_PATH = '/public';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
@@ -128,6 +128,12 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3081;
 const AUTH_COOKIE_NAME = 'share_ipa_auth';
 const VPN_COOKIE_NAME = 'share_ipa_vpn';
+const PIN_COOKIE_NAME = 'share_ipa_pin';
+const PIN_GRANT_TTL_SEC = Math.max(60, Number(process.env.PIN_GRANT_TTL_SEC) || 2 * 60 * 60);
+const PIN_FAIL_LIMIT = 8;
+const PIN_FAIL_WINDOW_MS = 10 * 60 * 1000;
+const PIN_LOCK_MS = 5 * 60 * 1000;
+const pinFailState = new Map();
 
 const { execFileSync } = require('child_process');
 
@@ -412,13 +418,52 @@ function hasVpnAccess(req) {
     return false;
 }
 
-function requestFileAccessToken(req) {
-    return (req.query && req.query.k ? String(req.query.k) : '').trim();
+function pinGrantId(platform, bundleId) {
+    return `pin:${visibilityKey(platform, bundleId)}`;
 }
 
-function hasFileAccess(req, filename) {
-    if (hasVpnAccess(req)) return true;
-    return auth.verifyFileAccessToken(requestFileAccessToken(req), filename);
+function hasPinGrant(req, platform, bundleId) {
+    if (!bundleId) return false;
+    const cookies = parseCookies((req.headers && req.headers.cookie) || '');
+    return auth.verifyFileAccessToken(cookies[PIN_COOKIE_NAME] || '', pinGrantId(platform, bundleId));
+}
+
+function pinClientKey(req) {
+    const ips = collectClientIps(req);
+    return ips[0] || 'unknown';
+}
+
+function pinAttemptBlocked(req) {
+    const key = pinClientKey(req);
+    const row = pinFailState.get(key);
+    if (!row) return false;
+    if (row.lockedUntil && row.lockedUntil > Date.now()) return true;
+    if (row.lockedUntil && row.lockedUntil <= Date.now()) pinFailState.delete(key);
+    return false;
+}
+
+function notePinFailure(req) {
+    const key = pinClientKey(req);
+    const now = Date.now();
+    const row = pinFailState.get(key) || { fails: 0, start: now, lockedUntil: 0 };
+    if (now - row.start > PIN_FAIL_WINDOW_MS) {
+        row.fails = 0;
+        row.start = now;
+    }
+    row.fails += 1;
+    if (row.fails >= PIN_FAIL_LIMIT) {
+        row.lockedUntil = now + PIN_LOCK_MS;
+        row.fails = 0;
+    }
+    pinFailState.set(key, row);
+}
+
+function notePinSuccess(req) {
+    pinFailState.delete(pinClientKey(req));
+}
+
+function requestFileAccessToken(req) {
+    return (req.query && req.query.k ? String(req.query.k) : '').trim();
 }
 
 function appendQueryParam(url, key, value) {
@@ -445,8 +490,12 @@ function addFileAccessTokenToDownloadUrl(downloadUrl, token) {
 }
 
 function withFileAccessToken(item, req) {
-    if (!item || !item.vpnRequired || !item.id || !hasVpnAccess(req)) return item;
-    const token = auth.createFileAccessToken(item.id, VPN_GRANT_TTL_SEC);
+    if (!item || !item.id || !req) return item;
+    if (!item.vpnRequired && !item.pinRequired) return item;
+    if (item.vpnRequired && !hasVpnAccess(req)) return item;
+    if (item.pinRequired && !hasPinGrant(req, item.platform || 'ios', item.bundleId)) return item;
+    const ttl = item.pinRequired ? PIN_GRANT_TTL_SEC : VPN_GRANT_TTL_SEC;
+    const token = auth.createFileAccessToken(item.id, ttl);
     if (!token) return item;
     return {
         ...item,
@@ -475,6 +524,14 @@ function denyVpnRequired(res, req, message) {
         checkUrl: VPN_CHECK_URL,
         vpn: vpnClientInfo(req),
         message: message || 'Không có quyền truy cập.',
+    });
+}
+
+function denyPinRequired(res) {
+    return res.status(403).json({
+        success: false,
+        pinRequired: true,
+        message: 'Cần nhập mã bảo mật để tiếp tục.',
     });
 }
 
@@ -694,6 +751,7 @@ function sendHtmlWithOg(res, fileName, ogMeta, extras) {
             rendered = rendered.replace('<!-- __OG_META__ -->', '');
         }
         rendered = rendered.replace(/__VPN_LOCKED__/g, extras && extras.vpnLocked ? 'true' : 'false');
+        rendered = rendered.replace(/__PIN_LOCKED__/g, extras && extras.pinLocked ? 'true' : 'false');
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.send(rendered);
@@ -750,13 +808,14 @@ app.use('/uploads', async (req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
     const filename = path.basename(req.path || '');
     if (!isPackageUploadName(filename)) return next();
-    if (hasFileAccess(req, filename)) return next();
     try {
-        if (!(await isUploadVpnProtected(filename))) return next();
+        const access = await readUploadAccess(filename);
+        const decision = uploadAccessDecision(req, access);
+        if (decision.ok) return next();
+        return denyUploadAccess(res, req, decision);
     } catch (_) {
         return next();
     }
-    return denyVpnRequired(res, req);
 });
 app.get('/uploads/:filename', (req, res, next) => {
     const filename = path.basename(req.params.filename || '');
@@ -802,14 +861,15 @@ app.use('/uploads', express.static(UPLOADS_MAIN_DIR, {
 app.use('/storage', async (req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
     const filename = path.basename(req.path || '');
-    if (hasFileAccess(req, filename)) return next();
     if (!isPackageUploadName(filename)) return next();
     try {
-        if (!(await isUploadVpnProtected(filename))) return next();
+        const access = await readUploadAccess(filename);
+        const decision = uploadAccessDecision(req, access);
+        if (decision.ok) return next();
+        return denyUploadAccess(res, req, decision);
     } catch (_) {
         return next();
     }
-    return denyVpnRequired(res, req);
 });
 app.use('/storage', express.static(ARCHIVE_STORAGE_DIR));
 
@@ -841,6 +901,7 @@ app.get('/login', (req, res) => res.redirect(APP_HOME_PATH));
 app.get('/install', async (req, res) => {
     const rawPlist = (req.query.plist || req.query.id || '').toString().trim();
     let vpnLocked = false;
+    let pinLocked = false;
     let og = buildOgMeta({
         title: 'Cài đặt ứng dụng — Share IPA',
         description: 'Quét mã QR hoặc nhấn nút để cài đặt ứng dụng iOS/Android nội bộ.',
@@ -853,9 +914,13 @@ app.get('/install', async (req, res) => {
             const record = list.find(item => item.id === targetId);
             if (record) {
                 const visibility = await readAppVisibility();
-                const vpnRequired = isAppVpnRequired(visibility, record.platform || 'ios', record.bundleId);
-                vpnLocked = !!(vpnRequired && !hasVpnAccess(req));
-                if (!vpnRequired || hasVpnAccess(req)) {
+                const platform = record.platform || 'ios';
+                const vpnRequired = isAppVpnRequired(visibility, platform, record.bundleId);
+                const pinRequired = isAppPinRequired(visibility, platform, record.bundleId);
+                const vpnAccess = hasVpnAccess(req);
+                vpnLocked = !!(vpnRequired && !vpnAccess);
+                pinLocked = !!(pinRequired && !vpnLocked && !hasPinGrant(req, platform, record.bundleId));
+                if ((!vpnRequired || vpnAccess) && (!pinRequired || hasPinGrant(req, platform, record.bundleId))) {
                     const platformLabel = record.platform === 'android' ? 'Android' : 'iOS';
                     const installQuery = record.platform === 'android'
                         ? `id=${encodeURIComponent(record.id)}`
@@ -870,7 +935,7 @@ app.get('/install', async (req, res) => {
             }
         } catch (_) { /* giữ OG mặc định nếu catalog lỗi */ }
     }
-    sendHtmlWithOg(res, 'install.html', og, { vpnLocked });
+    sendHtmlWithOg(res, 'install.html', og, { vpnLocked, pinLocked });
 });
 
 // Trang danh sách mục download (admin tạo / quản lý)
@@ -1187,6 +1252,56 @@ app.post('/api/vpn-grant', (req, res) => {
     return res.json({ success: true, vpnAccess: true, expiresIn: VPN_GRANT_TTL_SEC });
 });
 
+app.post('/api/install-pin', async (req, res) => {
+    try {
+        if (pinAttemptBlocked(req)) {
+            return res.status(429).json({
+                success: false,
+                message: 'Bạn đã nhập sai quá nhiều lần. Thử lại sau ít phút.',
+            });
+        }
+        const raw = (req.body?.plist || req.body?.id || '').toString().trim();
+        const pin = (req.body?.pin || '').toString().trim();
+        if (!raw) {
+            return res.status(400).json({ success: false, message: 'Thiếu thông tin bản build.' });
+        }
+        if (!/^\d{6}$/.test(pin)) {
+            return res.status(400).json({ success: false, message: 'Mã bảo mật phải gồm đúng 6 chữ số.' });
+        }
+
+        const targetId = raw.replace(/\.plist$/i, '');
+        const list = await readCatalog();
+        const record = list.find((item) => item.id === targetId);
+        if (!record) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy thông tin bản build này.' });
+        }
+
+        const platform = record.platform || 'ios';
+        const visibility = await readAppVisibility();
+        const flags = parseAppFlags(visibility && visibility[visibilityKey(platform, record.bundleId)]);
+        if (flags.vpnRequired && !hasVpnAccess(req)) {
+            return denyVpnRequired(res, req);
+        }
+        if (!flags.pinRequired) {
+            return res.json({ success: true, pinRequired: false });
+        }
+        if (!auth.installPinMatches(pin, flags.pinHash)) {
+            notePinFailure(req);
+            return res.status(401).json({ success: false, message: 'Mã bảo mật không đúng.' });
+        }
+
+        notePinSuccess(req);
+        const token = auth.createFileAccessToken(pinGrantId(platform, record.bundleId), PIN_GRANT_TTL_SEC);
+        res.append(
+            'Set-Cookie',
+            `${PIN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${PIN_GRANT_TTL_SEC}`
+        );
+        return res.json({ success: true, pinRequired: true });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: 'Không xác thực mã bảo mật được.' });
+    }
+});
+
 app.post('/api/logout', (req, res) => {
     res.append(
         'Set-Cookie',
@@ -1195,6 +1310,10 @@ app.post('/api/logout', (req, res) => {
     res.append(
         'Set-Cookie',
         `${VPN_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+    );
+    res.append(
+        'Set-Cookie',
+        `${PIN_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
     );
     res.json({ success: true });
 });
@@ -1300,7 +1419,7 @@ function toClientBuild(record, req) {
         const lanDownload = buildClientDownloadUrl(item, requestBaseUrl(req));
         if (lanDownload) item.downloadUrl = lanDownload;
     }
-    return withFileAccessToken(stripVpnSecrets(item, req), req);
+    return withFileAccessToken(stripAccessSecrets(item, req), req);
 }
 
 function uploadsFileExists(filename) {
@@ -1445,9 +1564,18 @@ function visibilityKey(platform, bundleId) {
 }
 
 function parseAppFlags(entry) {
-    if (entry === true) return { hidden: true, vpnRequired: false };
-    if (!entry || typeof entry !== 'object') return { hidden: false, vpnRequired: false };
-    return { hidden: !!entry.hidden, vpnRequired: !!entry.vpnRequired };
+    if (entry === true) return { hidden: true, vpnRequired: false, pinRequired: false, pinHash: '' };
+    if (!entry || typeof entry !== 'object') {
+        return { hidden: false, vpnRequired: false, pinRequired: false, pinHash: '' };
+    }
+    const pinHash = typeof entry.pinHash === 'string' ? entry.pinHash : '';
+    const pinRequired = !!entry.pinRequired && /^[a-f0-9]{64}$/.test(pinHash);
+    return {
+        hidden: !!entry.hidden,
+        vpnRequired: !!entry.vpnRequired,
+        pinRequired,
+        pinHash: pinRequired ? pinHash : '',
+    };
 }
 
 function isAppHidden(visibility, platform, bundleId) {
@@ -1456,6 +1584,10 @@ function isAppHidden(visibility, platform, bundleId) {
 
 function isAppVpnRequired(visibility, platform, bundleId) {
     return parseAppFlags(visibility && visibility[visibilityKey(platform, bundleId)]).vpnRequired;
+}
+
+function isAppPinRequired(visibility, platform, bundleId) {
+    return parseAppFlags(visibility && visibility[visibilityKey(platform, bundleId)]).pinRequired;
 }
 
 async function readAppVisibility() {
@@ -1469,14 +1601,30 @@ function patchAppVisibility(visibility, platform, bundleId, patch) {
     const current = parseAppFlags(visibility[key]);
     const flags = { ...current, ...patch };
     const next = { ...visibility };
-    if (!flags.hidden && !flags.vpnRequired) delete next[key];
-    else next[key] = flags;
+    const stored = {};
+    if (flags.hidden) stored.hidden = true;
+    if (flags.vpnRequired) stored.vpnRequired = true;
+    if (flags.pinRequired && flags.pinHash) {
+        stored.pinRequired = true;
+        stored.pinHash = flags.pinHash;
+    }
+    if (!stored.hidden && !stored.vpnRequired && !stored.pinRequired) delete next[key];
+    else next[key] = stored;
     return next;
 }
 
-function stripVpnSecrets(item, req) {
-    if (!item || !item.vpnRequired || hasVpnAccess(req)) return item;
-    return { ...item, downloadUrl: null, qr: null, shareUrl: null, fileAccessToken: null };
+function stripAccessSecrets(item, req) {
+    if (!item) return item;
+    const platform = item.platform || 'ios';
+    const vpnBlocked = !!(item.vpnRequired && !hasVpnAccess(req));
+    const pinBlocked = !!(item.pinRequired && !hasPinGrant(req, platform, item.bundleId));
+    if (!vpnBlocked && !pinBlocked) return item;
+    const next = { ...item, downloadUrl: null, fileAccessToken: null };
+    if (vpnBlocked) {
+        next.qr = null;
+        next.shareUrl = null;
+    }
+    return next;
 }
 
 function productNeedsVpn(product, visibility) {
@@ -1492,19 +1640,47 @@ function catalogItemsForUser(items, visibility, user, req) {
         const platform = item.platform || 'ios';
         const bundleId = item.bundleId || item.id;
         const flags = parseAppFlags(visibility && visibility[visibilityKey(platform, bundleId)]);
-        return stripVpnSecrets({ ...item, hidden: flags.hidden, vpnRequired: flags.vpnRequired }, req);
+        return stripAccessSecrets({
+            ...item,
+            hidden: flags.hidden,
+            vpnRequired: flags.vpnRequired,
+            pinRequired: flags.pinRequired,
+        }, req);
     });
     if (isAdminUser(user)) return mapped;
     return mapped.filter((item) => !item.hidden);
 }
 
-async function isUploadVpnProtected(filename) {
+async function readUploadAccess(filename) {
     const id = String(filename || '').replace(/\.plist$/i, '');
-    if (!id) return false;
+    if (!id) return null;
     const [list, visibility] = await Promise.all([readCatalog(), readAppVisibility()]);
     const record = list.find((item) => item.id === id);
-    if (!record) return false;
-    return isAppVpnRequired(visibility, record.platform || 'ios', record.bundleId);
+    if (!record) return null;
+    const platform = record.platform || 'ios';
+    const flags = parseAppFlags(visibility && visibility[visibilityKey(platform, record.bundleId)]);
+    return {
+        id: record.id,
+        platform,
+        bundleId: record.bundleId,
+        vpnRequired: !!flags.vpnRequired,
+        pinRequired: !!flags.pinRequired,
+    };
+}
+
+function uploadAccessDecision(req, access) {
+    if (!access || (!access.vpnRequired && !access.pinRequired)) return { ok: true };
+    if (auth.verifyFileAccessToken(requestFileAccessToken(req), access.id)) return { ok: true };
+    const vpnOk = !access.vpnRequired || hasVpnAccess(req);
+    const pinOk = !access.pinRequired || hasPinGrant(req, access.platform, access.bundleId);
+    if (vpnOk && pinOk) return { ok: true };
+    if (!vpnOk) return { ok: false, reason: 'vpn' };
+    return { ok: false, reason: 'pin' };
+}
+
+function denyUploadAccess(res, req, decision) {
+    if (decision && decision.reason === 'pin') return denyPinRequired(res);
+    return denyVpnRequired(res, req);
 }
 
 function isPackageUploadName(filename) {
@@ -1988,6 +2164,44 @@ app.post('/api/catalog/vpn-required', requireAdmin, async (req, res) => {
     } catch (err) {
         logToUI(`❌ Lỗi khi cập nhật giới hạn truy cập: ${err.message}`, 'error');
         return res.status(500).json({ success: false, message: `Lỗi khi cập nhật giới hạn truy cập: ${err.message}` });
+    }
+});
+
+app.post('/api/catalog/pin-required', requireAdmin, async (req, res) => {
+    try {
+        const bundleId = (req.body?.bundleId || '').toString().trim();
+        const platform = (req.body?.platform || '').toString().trim().toLowerCase() === 'android'
+            ? 'android'
+            : 'ios';
+        const pinRequired = req.body?.pinRequired === true || req.body?.pinRequired === 'true';
+        const pin = (req.body?.pin || '').toString().trim();
+        if (!isSafeBundleId(bundleId)) {
+            return res.status(400).json({ success: false, message: 'Thiếu bundleId hợp lệ.' });
+        }
+        if (pinRequired && !/^\d{6}$/.test(pin)) {
+            return res.status(400).json({ success: false, message: 'Mã bảo mật phải gồm đúng 6 chữ số.' });
+        }
+        if (!github.isConfigured()) {
+            return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ danh mục trên máy chủ nên không thể cập nhật.' });
+        }
+
+        const { data, sha } = await loadJsonObjectFile(APP_VISIBILITY_PATH);
+        const next = patchAppVisibility(data, platform, bundleId, pinRequired
+            ? { pinRequired: true, pinHash: auth.hashInstallPin(pin) }
+            : { pinRequired: false, pinHash: '' });
+        const actor = req.currentUser.username;
+        await saveJsonObjectFile(
+            APP_VISIBILITY_PATH,
+            next,
+            `${pinRequired ? 'require install pin' : 'clear install pin'} ${visibilityKey(platform, bundleId)} by ${actor}`,
+            sha
+        );
+
+        logToUI(`${pinRequired ? '🔢' : '🔓'} ${actor} đã ${pinRequired ? 'bật mã bảo mật' : 'tắt mã bảo mật'} cho ${bundleId} (${platform})`, 'info');
+        return res.json({ success: true, bundleId, platform, pinRequired });
+    } catch (err) {
+        logToUI(`❌ Lỗi khi cập nhật mã bảo mật: ${err.message}`, 'error');
+        return res.status(500).json({ success: false, message: `Lỗi khi cập nhật mã bảo mật: ${err.message}` });
     }
 });
 
@@ -2493,12 +2707,17 @@ app.get('/api/app-info', async (req, res) => {
         }
 
         const visibility = await readAppVisibility();
-        const vpnRequired = isAppVpnRequired(visibility, record.platform || 'ios', record.bundleId);
+        const platform = record.platform || 'ios';
+        const vpnRequired = isAppVpnRequired(visibility, platform, record.bundleId);
+        const pinRequired = isAppPinRequired(visibility, platform, record.bundleId);
         if (vpnRequired && !hasVpnAccess(req)) {
             return denyVpnRequired(res, req);
         }
+        if (pinRequired && !hasPinGrant(req, platform, record.bundleId)) {
+            return denyPinRequired(res);
+        }
 
-        const item = toClientBuild({ ...record, vpnRequired }, req);
+        const item = toClientBuild({ ...record, vpnRequired, pinRequired }, req);
         const payload = {
             success: true,
             item: {
@@ -2518,6 +2737,7 @@ app.get('/api/app-info', async (req, res) => {
                 shareUrl: item.shareUrl,
                 downloadUrl: item.downloadUrl,
                 localFileAvailable: !!item.localFileAvailable,
+                pinRequired: !!pinRequired,
             }
         };
         if (item.fileAccessToken) payload.item.fileAccessToken = item.fileAccessToken;
@@ -2544,6 +2764,7 @@ app.get('/api/app-builds', async (req, res) => {
             : 'ios';
         const hidden = isAppHidden(visibility, platformForVisibility, bundleId);
         const vpnRequired = isAppVpnRequired(visibility, platformForVisibility, bundleId);
+        const pinRequired = isAppPinRequired(visibility, platformForVisibility, bundleId);
         const vpnAccess = hasVpnAccess(req);
         if (hidden && !isAdminUser(user)) {
             return res.status(404).json({ success: false, message: `Không có bản build nào cho "${bundleId}".` });
@@ -2556,7 +2777,7 @@ app.get('/api/app-builds', async (req, res) => {
             .filter(item => (item.bundleId || item.id) === bundleId)
             .filter(item => !platformFilter || (item.platform || 'ios') === platformFilter)
             .map(item => {
-                const b = toClientBuild({ ...item, vpnRequired }, req);
+                const b = toClientBuild({ ...item, vpnRequired, pinRequired }, req);
                 const row = {
                     id: b.id,
                     appName: b.appName,
@@ -2580,7 +2801,8 @@ app.get('/api/app-builds', async (req, res) => {
                 };
                 if (isAdminUser(user)) row.hidden = hidden;
                 row.vpnRequired = vpnRequired;
-                return stripVpnSecrets(row, req);
+                row.pinRequired = pinRequired;
+                return stripAccessSecrets(row, req);
             })
             .sort((a, b) => (new Date(b.uploadedAt).getTime() || 0) - (new Date(a.uploadedAt).getTime() || 0));
 
@@ -2588,7 +2810,7 @@ app.get('/api/app-builds', async (req, res) => {
             return res.status(404).json({ success: false, message: `Không có bản build nào cho "${bundleId}".` });
         }
 
-        const payload = { success: true, bundleId, platform: platformFilter || null, builds, vpnRequired, vpnAccess };
+        const payload = { success: true, bundleId, platform: platformFilter || null, builds, vpnRequired, pinRequired, vpnAccess };
         if (isAdminUser(user)) payload.hidden = hidden;
         if (vpnRequired && !vpnAccess) payload.vpn = vpnClientInfo(req);
         return res.json(payload);

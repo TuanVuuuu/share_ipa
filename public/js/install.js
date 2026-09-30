@@ -31,7 +31,7 @@ function stopLoading() {
     installZone.classList.remove('is-loading');
 }
 
-function showVpnGateUi() {
+function hideInstallDetails() {
     stopLoading();
     if (installZone) installZone.classList.add('is-denied');
     const content = document.getElementById('install-content');
@@ -41,8 +41,89 @@ function showVpnGateUi() {
     if (installBack) installBack.style.display = 'none';
     const brand = document.querySelector('.install-brand');
     if (brand) brand.style.display = 'none';
+}
+
+function showVpnGateUi() {
+    hideInstallDetails();
+    const pinGate = document.getElementById('pin-gate-root');
+    if (pinGate) {
+        pinGate.classList.remove('is-open');
+        pinGate.innerHTML = '';
+        pinGate.style.display = 'none';
+        delete pinGate.dataset.ready;
+    }
     const gate = document.getElementById('vpn-gate-root');
     if (gate && window.VpnGate) window.VpnGate.mount(gate);
+}
+
+function showPinGateUi(buildId) {
+    hideInstallDetails();
+    const vpnGate = document.getElementById('vpn-gate-root');
+    if (vpnGate && window.VpnGate) window.VpnGate.hide(vpnGate);
+    const gate = document.getElementById('pin-gate-root');
+    if (!gate || gate.dataset.ready === '1') return;
+    gate.dataset.ready = '1';
+    gate.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'vpn-gate';
+    wrap.innerHTML = `
+        <h3>Nhập mã bảo mật</h3>
+        <p class="pin-gate-help">Nhập mã 6 số để tiếp tục cài đặt.</p>
+        <input class="pin-gate-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" aria-label="Mã bảo mật 6 số">
+        <div class="vpn-gate-actions">
+            <button type="button" class="btn vpn-lan-btn" data-pin-submit>Xác nhận</button>
+        </div>
+        <p data-pin-error></p>
+    `;
+    const input = wrap.querySelector('input');
+    const submit = wrap.querySelector('[data-pin-submit]');
+    const error = wrap.querySelector('[data-pin-error]');
+    let sending = false;
+    const send = async () => {
+        if (sending) return;
+        const pin = String(input.value || '').replace(/\D/g, '').slice(0, 6);
+        input.value = pin;
+        if (!/^\d{6}$/.test(pin)) {
+            error.textContent = 'Mã bảo mật phải gồm đúng 6 chữ số.';
+            return;
+        }
+        sending = true;
+        submit.disabled = true;
+        error.textContent = '';
+        try {
+            const res = await fetch('/api/install-pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ plist: buildId, pin }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) {
+                throw new Error((data && data.message) || 'Mã bảo mật không đúng.');
+            }
+            window.location.reload();
+        } catch (err) {
+            sending = false;
+            submit.disabled = false;
+            error.textContent = err.message || 'Mã bảo mật không đúng.';
+            input.focus();
+            input.select();
+        }
+    };
+    input.addEventListener('input', () => {
+        input.value = String(input.value || '').replace(/\D/g, '').slice(0, 6);
+        if (input.value.length === 6) send();
+    });
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            send();
+        }
+    });
+    submit.addEventListener('click', send);
+    gate.appendChild(wrap);
+    gate.classList.add('is-open');
+    gate.style.display = '';
+    input.focus();
 }
 
 function isAndroidUa() {
@@ -74,10 +155,14 @@ async function init() {
     let platform = looksLikeApk ? 'android' : (looksLikePlist ? 'ios' : null);
     let lanHintShown = false;
     let vpnBlocked = false;
+    let pinBlocked = false;
 
     if (window.__VPN_LOCKED__) {
         vpnBlocked = true;
         showVpnGateUi();
+    } else if (window.__PIN_LOCKED__) {
+        pinBlocked = true;
+        showPinGateUi(buildId);
     }
 
     try {
@@ -86,7 +171,14 @@ async function init() {
 
         if (data.vpnRequired || window.__VPN_LOCKED__) {
             vpnBlocked = true;
+            pinBlocked = false;
             showVpnGateUi();
+            return;
+        }
+
+        if (data.pinRequired || window.__PIN_LOCKED__) {
+            pinBlocked = true;
+            showPinGateUi(buildId);
             return;
         }
 
@@ -120,7 +212,7 @@ async function init() {
             installBtn.href = '#';
         }
 
-        if (window.LanTransfer) {
+        if (window.LanTransfer && !it.pinRequired) {
             await window.LanTransfer.applyDownloadHref(installBtn, it);
             const lanBase = await window.LanTransfer.getLanBase();
             if (lanBase && it.localFileAvailable) {
@@ -182,7 +274,7 @@ async function init() {
         stopLoading();
     }
 
-    if (vpnBlocked) return;
+    if (vpnBlocked || pinBlocked) return;
 
     if (platform === 'android') {
         installBtn.innerText = 'Tải & cài đặt APK';

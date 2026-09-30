@@ -71,12 +71,18 @@
             detailVpnCheckbox,
             detailVpnBadge,
             detailVpnGate,
+            detailPinToggle,
+            detailPinCheckbox,
+            detailPinBadge,
+            detailPinChange,
             canDeleteBuild,
             canManageApp,
             onDeleteBuild,
             onToggleVisibility,
             onDeleteAll,
             onToggleVpn,
+            onTogglePin,
+            onChangePin,
             qrModal,
             qrModalClose,
             qrModalTitle,
@@ -133,14 +139,17 @@
 
         function openQrModal(item) {
             const vpnBlocked = !!(currentGroup && currentGroup.vpnRequired && !currentGroup.vpnAccess);
+            const pinRequired = !!(currentGroup && currentGroup.pinRequired);
             const urlBox = qrModal.querySelector('.url-box');
             qrModalTitle.innerText = vpnBlocked ? '' : (item.appName || 'Ứng dụng');
             qrModalVersion.innerText = vpnBlocked
                 ? ''
                 : `${item.bundleId || ''} • v${item.version} (Build ${item.buildNumber})`;
             qrModalUrl.value = vpnBlocked ? '' : (item.shareUrl || '');
-            qrModalInstall.href = vpnBlocked ? '#' : (item.downloadUrl || '#');
-            if (!vpnBlocked && window.LanTransfer) {
+            qrModalInstall.href = vpnBlocked
+                ? '#'
+                : (pinRequired ? (item.shareUrl || '#') : (item.downloadUrl || '#'));
+            if (!vpnBlocked && !pinRequired && window.LanTransfer) {
                 window.LanTransfer.applyDownloadHref(qrModalInstall, item);
             }
             if (qrModalVpn) {
@@ -236,12 +245,28 @@
                 detailVpnCheckbox.checked = !!(group && group.vpnRequired);
                 detailVpnCheckbox.disabled = false;
             }
+            if (detailPinBadge) {
+                detailPinBadge.style.display = group && group.pinRequired ? 'inline-block' : 'none';
+            }
+            if (detailPinToggle) {
+                detailPinToggle.style.display = canManage && group ? '' : 'none';
+            }
+            if (detailPinCheckbox) {
+                detailPinCheckbox.checked = !!(group && group.pinRequired);
+                detailPinCheckbox.disabled = false;
+            }
+            if (detailPinChange) {
+                detailPinChange.style.display = canManage && group && group.pinRequired ? '' : 'none';
+                detailPinChange.disabled = false;
+            }
         }
 
         function setAdminBusy(busy) {
             if (detailVisibilityBtn) detailVisibilityBtn.disabled = !!busy;
             if (detailDeleteAllBtn) detailDeleteAllBtn.disabled = !!busy;
             if (detailVpnCheckbox) detailVpnCheckbox.disabled = !!busy;
+            if (detailPinCheckbox) detailPinCheckbox.disabled = !!busy;
+            if (detailPinChange) detailPinChange.disabled = !!busy;
         }
 
         if (detailVisibilityBtn && typeof onToggleVisibility === 'function') {
@@ -260,6 +285,18 @@
             detailVpnCheckbox.addEventListener('change', () => {
                 if (!currentGroup) return;
                 onToggleVpn(currentGroup, !!detailVpnCheckbox.checked);
+            });
+        }
+        if (detailPinCheckbox && typeof onTogglePin === 'function') {
+            detailPinCheckbox.addEventListener('change', () => {
+                if (!currentGroup) return;
+                onTogglePin(currentGroup, !!detailPinCheckbox.checked);
+            });
+        }
+        if (detailPinChange && typeof onChangePin === 'function') {
+            detailPinChange.addEventListener('click', () => {
+                if (!currentGroup) return;
+                onChangePin(currentGroup);
             });
         }
 
@@ -285,6 +322,7 @@
             detailBuilds.innerHTML = '';
             const showDelete = typeof canDeleteBuild === 'function' && canDeleteBuild();
             const vpnBlocked = !!(currentGroup && currentGroup.vpnRequired && !currentGroup.vpnAccess);
+            const pinRequired = !!(currentGroup && currentGroup.pinRequired);
             builds.forEach((build, index) => {
                 const metaTags = buildBuildMetaTags(build);
                 const devicesBlock = buildDevicesBlock(build);
@@ -301,13 +339,13 @@
                     </div>
                     <div class="build-actions">
                         <button type="button" class="btn secondary qr-btn">Xem QR</button>
-                        ${vpnBlocked ? '' : `<a class="btn install-mini" href="${escapeHtml(build.downloadUrl || '#')}">Cài đặt</a>`}
+                        ${vpnBlocked ? '' : `<a class="btn install-mini" href="${escapeHtml(pinRequired ? (build.shareUrl || '#') : (build.downloadUrl || '#'))}">Cài đặt</a>`}
                         ${showDelete ? '<button type="button" class="btn danger delete-build-btn">Xóa</button>' : ''}
                     </div>
                 `;
                 row.querySelector('.qr-btn').addEventListener('click', () => openQrModal(build));
                 const installLink = row.querySelector('.install-mini');
-                if (installLink && window.LanTransfer && !vpnBlocked) {
+                if (installLink && window.LanTransfer && !vpnBlocked && !pinRequired) {
                     window.LanTransfer.applyDownloadHref(installLink, build);
                 }
                 const deleteBtn = row.querySelector('.delete-build-btn');
@@ -326,6 +364,7 @@
             const hidden = !!(group.hidden || (latest && latest.hidden));
             group.hidden = hidden;
             group.vpnRequired = !!(group.vpnRequired || (latest && latest.vpnRequired));
+            group.pinRequired = !!(group.pinRequired || (latest && latest.pinRequired));
             group.vpnAccess = !!group.vpnAccess;
 
             detailIcon.src = latest.icon || FALLBACK_ICON;
@@ -403,6 +442,7 @@
             g.count = g.builds.length;
             g.hidden = g.builds.some((b) => b.hidden);
             g.vpnRequired = g.builds.some((b) => b.vpnRequired);
+            g.pinRequired = g.builds.some((b) => b.pinRequired);
         });
         return groups.sort((x, y) => (new Date(y.latest.uploadedAt).getTime() || 0) - (new Date(x.latest.uploadedAt).getTime() || 0));
     }
@@ -432,6 +472,7 @@
                     <h4>${escapeHtml(latest.appName)}</h4>
                     ${group.hidden ? '<span class="detail-hidden-badge">Đã ẩn</span>' : ''}
                     ${group.vpnRequired ? '<span class="detail-vpn-badge">Giới hạn</span>' : ''}
+                    ${group.pinRequired ? '<span class="detail-pin-badge">Mã bảo mật</span>' : ''}
                     <p class="app-card-bundle">${escapeHtml(latest.bundleId)}</p>
                 </div>
             </div>
@@ -462,5 +503,17 @@
         createAppFolderCard,
         buildAppDetailPath,
         buildPlatformListPath,
+        askInstallPin,
     };
+
+    function askInstallPin(message) {
+        const raw = window.prompt(message || 'Nhập mã bảo mật 6 số.');
+        if (raw == null) return null;
+        const pin = String(raw).trim();
+        if (!/^\d{6}$/.test(pin)) {
+            window.alert('Mã bảo mật phải gồm đúng 6 chữ số.');
+            return null;
+        }
+        return pin;
+    }
 })(window);
