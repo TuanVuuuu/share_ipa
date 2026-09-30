@@ -448,6 +448,10 @@ function notePinFailure(req) {
     pinFailState.set(key, row);
 }
 
+function notePinSuccess(req) {
+    pinFailState.delete(pinClientKey(req));
+}
+
 function clearPinCookie(res) {
     res.append(
         'Set-Cookie',
@@ -1302,6 +1306,7 @@ app.post('/api/install-pin', async (req, res) => {
             item: publicInstallItem(item, true),
         });
     } catch (err) {
+        logToUI(`❌ Xác thực mã bảo mật thất bại: ${err.message}`, 'error');
         return res.status(500).json({ success: false, message: 'Không xác thực mã bảo mật được.' });
     }
 });
