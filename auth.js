@@ -1,13 +1,20 @@
-// ─── Auth nhiều tài khoản + phân quyền theo role ───────────────────────────
-// Danh sách tài khoản đọc từ users.json (không commit git vì chứa mật khẩu).
+// ─── Auth nhiều tài khoản + JWT + Google Authenticator (TOTP) ───────────────
+// Danh sách tài khoản đọc từ users.json (không commit git vì chứa mật khẩu/secret).
 // Nếu users.json không tồn tại, fallback về 1 tài khoản admin lấy từ .env
 // (ACCESS_USERNAME/ACCESS_PASSWORD) để tương thích ngược bản cũ.
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const jwt = require('jsonwebtoken');
+const { generateSecret, generateURI, verifySync } = require('otplib');
+const QRCode = require('qrcode');
 
 const USERS_CONFIG_PATH = path.join(__dirname, 'users.json');
-const SESSION_SECRET = process.env.SESSION_SECRET || 'share-ipa-local-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || 'share-ipa-local-secret-change-me';
+const TOTP_ISSUER = process.env.TOTP_ISSUER || 'Share IPA';
+const ACCESS_TOKEN_TTL_SEC = Math.max(300, Number(process.env.JWT_TTL_SEC) || 86400);
+const PENDING_TOKEN_TTL_SEC = Math.max(60, Number(process.env.TOTP_PENDING_TTL_SEC) || 300);
+const TOTP_EPOCH_TOLERANCE_SEC = 30;
 
 // Ma trận quyền theo role.
 // upload_build: đẩy bản build | delete_build: xóa bản build
@@ -21,35 +28,63 @@ const ROLE_PERMISSIONS = {
     tester: ['create_download_link'],
 };
 
-function loadUsers() {
+function normalizeUser(raw) {
+    if (!raw || !raw.username || !raw.password) return null;
+    const totpSecret = raw.totpSecret ? String(raw.totpSecret).trim() : '';
+    return {
+        username: String(raw.username).trim(),
+        password: String(raw.password),
+        role: ROLE_PERMISSIONS[raw.role] ? raw.role : 'dev',
+        totpSecret,
+        totpEnabled: totpSecret ? raw.totpEnabled !== false : false,
+    };
+}
+
+function loadUsersFromDisk() {
     try {
         if (fs.existsSync(USERS_CONFIG_PATH)) {
             const parsed = JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf8'));
             if (Array.isArray(parsed) && parsed.length) {
-                return parsed
-                    .filter(u => u && u.username && u.password)
-                    .map(u => ({
-                        username: String(u.username).trim(),
-                        password: String(u.password),
-                        role: ROLE_PERMISSIONS[u.role] ? u.role : 'dev',
-                    }));
+                return parsed.map(normalizeUser).filter(Boolean);
             }
         }
     } catch (err) {
         console.error('[AUTH] ❌ Không đọc được users.json:', err.message);
     }
 
-    // Fallback tương thích ngược: 1 tài khoản admin duy nhất từ .env
     const legacyUsername = process.env.ACCESS_USERNAME?.trim();
     const legacyPassword = process.env.ACCESS_PASSWORD?.trim();
     if (legacyUsername && legacyPassword) {
-        return [{ username: legacyUsername, password: legacyPassword, role: 'admin' }];
+        return [{ username: legacyUsername, password: legacyPassword, role: 'admin', totpSecret: '', totpEnabled: false }];
     }
     return [];
 }
 
-const USERS = loadUsers();
-console.log(`[AUTH] Đã tải ${USERS.length} tài khoản: ${USERS.map(u => `${u.username}(${u.role})`).join(', ') || '(trống)'}`);
+let USERS = loadUsersFromDisk();
+console.log(`[AUTH] Đã tải ${USERS.length} tài khoản: ${USERS.map(u => `${u.username}(${u.role}${u.totpEnabled ? '+2FA' : ''})`).join(', ') || '(trống)'}`);
+
+function reloadUsers() {
+    USERS = loadUsersFromDisk();
+    return USERS;
+}
+
+function persistUsers(users) {
+    const payload = users.map(u => {
+        const row = {
+            username: u.username,
+            password: u.password,
+            role: u.role,
+        };
+        if (u.totpSecret) {
+            row.totpSecret = u.totpSecret;
+            row.totpEnabled = u.totpEnabled !== false;
+        }
+        return row;
+    });
+    fs.writeFileSync(USERS_CONFIG_PATH, `${JSON.stringify(payload, null, 4)}\n`, 'utf8');
+    USERS = payload.map(normalizeUser).filter(Boolean);
+    return USERS;
+}
 
 function findUser(username) {
     if (!username) return null;
@@ -66,7 +101,12 @@ function hasPermission(user, permission) {
 
 function toPublicUser(user) {
     if (!user) return null;
-    return { username: user.username, role: user.role, permissions: getPermissions(user.role) };
+    return {
+        username: user.username,
+        role: user.role,
+        permissions: getPermissions(user.role),
+        totpEnabled: !!user.totpEnabled,
+    };
 }
 
 function verifyCredentials(username, password) {
@@ -75,36 +115,103 @@ function verifyCredentials(username, password) {
     return null;
 }
 
-// Ký token phiên đăng nhập bằng HMAC để tránh người dùng tự sửa cookie giả danh tài khoản khác.
-function sign(value) {
-    return crypto.createHmac('sha256', SESSION_SECRET).update(value).digest('hex');
+function createAccessToken(username) {
+    return jwt.sign(
+        { sub: username, typ: 'access' },
+        JWT_SECRET,
+        { expiresIn: ACCESS_TOKEN_TTL_SEC }
+    );
 }
 
-function createSessionToken(username) {
-    const payload = Buffer.from(username, 'utf8').toString('base64url');
-    return `${payload}.${sign(payload)}`;
-}
-
-function verifySessionToken(token) {
-    if (!token || typeof token !== 'string' || !token.includes('.')) return null;
-    const [payload, signature] = token.split('.');
-    if (!payload || !signature) return null;
-
-    const expected = sign(payload);
-    const sigBuf = Buffer.from(signature);
-    const expBuf = Buffer.from(expected);
-    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) return null;
-
+function verifyAccessToken(token) {
+    if (!token || typeof token !== 'string') return null;
     try {
-        const username = Buffer.from(payload, 'base64url').toString('utf8');
+        const payload = jwt.verify(token, JWT_SECRET);
+        if (payload.typ && payload.typ !== 'access') return null;
+        const username = payload.sub || payload.username;
         return findUser(username);
     } catch (_) {
         return null;
     }
 }
 
+function createPendingToken(username, step, extra = {}) {
+    return jwt.sign(
+        {
+            sub: username,
+            typ: 'pending',
+            step,
+            ...extra,
+        },
+        JWT_SECRET,
+        { expiresIn: PENDING_TOKEN_TTL_SEC }
+    );
+}
+
+function verifyPendingToken(token, expectedStep) {
+    if (!token || typeof token !== 'string') return null;
+    try {
+        const payload = jwt.verify(token, JWT_SECRET);
+        if (payload.typ !== 'pending') return null;
+        if (expectedStep && payload.step !== expectedStep) return null;
+        const user = findUser(payload.sub);
+        if (!user) return null;
+        return { user, payload };
+    } catch (_) {
+        return null;
+    }
+}
+
+function verifyTotpCode(secret, code) {
+    const token = String(code || '').replace(/\s+/g, '');
+    if (!secret || !/^\d{6}$/.test(token)) return false;
+    const result = verifySync({
+        secret,
+        token,
+        epochTolerance: TOTP_EPOCH_TOLERANCE_SEC,
+    });
+    return !!(result && result.valid);
+}
+
+async function beginTotpSetup(username) {
+    const secret = generateSecret();
+    const otpauthUrl = generateURI({
+        issuer: TOTP_ISSUER,
+        label: username,
+        secret,
+    });
+    const qrDataUrl = await QRCode.toDataURL(otpauthUrl, {
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 220,
+    });
+    const pendingToken = createPendingToken(username, 'totp_setup', { totpSecret: secret });
+    return {
+        step: 'totp_setup',
+        pendingToken,
+        otpauthUrl,
+        qrDataUrl,
+        secret,
+        expiresIn: PENDING_TOKEN_TTL_SEC,
+    };
+}
+
+function enableTotpForUser(username, secret) {
+    const users = loadUsersFromDisk();
+    const idx = users.findIndex(u => u.username === username);
+    if (idx < 0) throw new Error('Không tìm thấy tài khoản.');
+    users[idx].totpSecret = secret;
+    users[idx].totpEnabled = true;
+    persistUsers(users);
+    return findUser(username);
+}
+
 function fileAccessId(filename) {
     return path.basename(String(filename || '')).replace(/\.plist$/i, '');
+}
+
+function sign(value) {
+    return crypto.createHmac('sha256', JWT_SECRET).update(value).digest('hex');
 }
 
 function createFileAccessToken(filename, ttlSec = 12 * 60 * 60) {
@@ -138,13 +245,26 @@ function verifyFileAccessToken(token, filename) {
     }
 }
 
+// Tương thích tên cũ (session HMAC) — giờ là JWT access token
+const createSessionToken = createAccessToken;
+const verifySessionToken = verifyAccessToken;
+
 module.exports = {
     verifyCredentials,
     createSessionToken,
     verifySessionToken,
+    createAccessToken,
+    verifyAccessToken,
+    createPendingToken,
+    verifyPendingToken,
+    beginTotpSetup,
+    enableTotpForUser,
+    verifyTotpCode,
     createFileAccessToken,
     verifyFileAccessToken,
     hasPermission,
     getPermissions,
     toPublicUser,
+    reloadUsers,
+    findUser,
 };

@@ -47,6 +47,15 @@ const authSubmit = document.getElementById('auth-submit');
 const logoutBtn = document.getElementById('logout-btn');
 const authUsernameLabel = document.getElementById('auth-username-label');
 const authRoleBadge = document.getElementById('auth-role-badge');
+const authTitle = document.getElementById('auth-title');
+const authSubtitle = document.getElementById('auth-subtitle');
+const authStepCredentials = document.getElementById('auth-step-credentials');
+const authStepTotp = document.getElementById('auth-step-totp');
+const authTotpSetup = document.getElementById('auth-totp-setup');
+const authTotpQr = document.getElementById('auth-totp-qr');
+const authTotpManual = document.getElementById('auth-totp-manual');
+const authTotpCode = document.getElementById('auth-totp-code');
+const authBackBtn = document.getElementById('auth-back-btn');
 
 const catalogContainer = document.getElementById('catalog-container');
 const catalogList = document.getElementById('catalog-list');
@@ -61,6 +70,8 @@ let currentUser = null; // { username, role, permissions }
 let vpnAccess = false;
 let vpnInfo = null;
 let logsSource = null;
+let pendingAuthToken = null;
+let authLoginStep = 'credentials'; // credentials | totp_required | totp_setup
 
 function canDeleteBuild() {
     return !!(currentUser && currentUser.permissions && currentUser.permissions.includes('delete_build'));
@@ -139,8 +150,90 @@ function setAuthDialogOpen(open) {
     authBox.style.display = open ? 'flex' : 'none';
     document.body.classList.toggle('auth-dialog-open', open);
     if (!open) return;
+    const focusEl = authLoginStep === 'credentials'
+        ? document.getElementById('auth-username')
+        : authTotpCode;
+    if (focusEl) setTimeout(() => focusEl.focus(), 0);
+}
+
+function resetAuthLoginUi() {
+    pendingAuthToken = null;
+    authLoginStep = 'credentials';
+    if (authTitle) authTitle.textContent = 'Đăng nhập để tiếp tục';
+    if (authSubtitle) {
+        authSubtitle.textContent = 'Đăng nhập để mở khoá tính năng tải lên và quản lý bản build.';
+    }
+    if (authStepCredentials) authStepCredentials.hidden = false;
+    if (authStepTotp) authStepTotp.hidden = true;
+    if (authTotpSetup) authTotpSetup.hidden = true;
+    if (authTotpQr) authTotpQr.removeAttribute('src');
+    if (authTotpManual) {
+        authTotpManual.hidden = true;
+        authTotpManual.textContent = '';
+    }
+    if (authTotpCode) {
+        authTotpCode.value = '';
+        authTotpCode.required = false;
+    }
     const userInput = document.getElementById('auth-username');
-    if (userInput) setTimeout(() => userInput.focus(), 0);
+    const passInput = document.getElementById('auth-password');
+    if (userInput) userInput.required = true;
+    if (passInput) {
+        passInput.required = true;
+        passInput.value = '';
+    }
+    if (authSubmit) authSubmit.innerText = 'Đăng nhập';
+    if (authError) authError.textContent = '';
+}
+
+function showTotpStep(data) {
+    pendingAuthToken = data.pendingToken || null;
+    authLoginStep = data.step;
+    if (authStepCredentials) authStepCredentials.hidden = true;
+    if (authStepTotp) authStepTotp.hidden = false;
+
+    const userInput = document.getElementById('auth-username');
+    const passInput = document.getElementById('auth-password');
+    if (userInput) userInput.required = false;
+    if (passInput) passInput.required = false;
+    if (authTotpCode) {
+        authTotpCode.required = true;
+        authTotpCode.value = '';
+    }
+
+    const isSetup = data.step === 'totp_setup';
+    if (authTotpSetup) authTotpSetup.hidden = !isSetup;
+    if (isSetup) {
+        if (authTitle) authTitle.textContent = 'Kích hoạt Google Authenticator';
+        if (authSubtitle) {
+            authSubtitle.textContent = data.message
+                || 'Quét QR rồi nhập mã 6 số để hoàn tất lần đầu.';
+        }
+        if (authTotpQr && data.qrDataUrl) authTotpQr.src = data.qrDataUrl;
+        if (authTotpManual && data.otpauthUrl) {
+            authTotpManual.hidden = false;
+            authTotpManual.textContent = `Không quét được? Thêm thủ công bằng URI trong Google Authenticator.`;
+        }
+        if (authSubmit) authSubmit.innerText = 'Xác nhận & kích hoạt';
+    } else {
+        if (authTitle) authTitle.textContent = 'Xác thực 2 bước';
+        if (authSubtitle) {
+            authSubtitle.textContent = data.message
+                || 'Nhập mã 6 số từ Google Authenticator.';
+        }
+        if (authSubmit) authSubmit.innerText = 'Xác nhận';
+    }
+
+    setTimeout(() => authTotpCode && authTotpCode.focus(), 0);
+}
+
+function finishAuthSuccess(data) {
+    currentUser = { username: data.username, role: data.role, permissions: data.permissions || [] };
+    vpnAccess = !!data.vpnAccess;
+    vpnInfo = data.vpn || vpnInfo;
+    resetAuthLoginUi();
+    if (redirectIfNextParam()) return;
+    applyAuthState(true);
 }
 
 function applyAuthState(authenticated) {
@@ -692,10 +785,12 @@ async function checkAuthStatus() {
             : null;
         vpnAccess = !!data.vpnAccess;
         vpnInfo = data.vpn || null;
+        if (!data.authenticated) resetAuthLoginUi();
         applyAuthState(!!data.authenticated);
         if (data.authenticated) redirectIfNextParam();
     } catch (err) {
         currentUser = null;
+        resetAuthLoginUi();
         applyAuthState(false);
     }
 }
@@ -705,39 +800,72 @@ authForm.addEventListener('submit', async (e) => {
     authError.textContent = '';
     authSubmit.disabled = true;
     const original = authSubmit.innerText;
-    authSubmit.innerText = 'Đang đăng nhập...';
 
     try {
-        const res = await fetch('/api/login', {
+        if (authLoginStep === 'credentials') {
+            authSubmit.innerText = 'Đang đăng nhập...';
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: document.getElementById('auth-username').value,
+                    password: document.getElementById('auth-password').value
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                throw new Error(data.message || 'Đăng nhập thất bại.');
+            }
+            if (data.step === 'totp_required' || data.step === 'totp_setup') {
+                showTotpStep(data);
+                return;
+            }
+            finishAuthSuccess(data);
+            return;
+        }
+
+        authSubmit.innerText = 'Đang xác thực...';
+        const code = (authTotpCode && authTotpCode.value || '').trim();
+        if (!/^\d{6}$/.test(code)) {
+            throw new Error('Nhập đúng mã 6 số từ Google Authenticator.');
+        }
+        const res = await fetch('/api/login/totp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                username: document.getElementById('auth-username').value,
-                password: document.getElementById('auth-password').value
+                pendingToken: pendingAuthToken,
+                code,
             })
         });
         const data = await res.json();
         if (!res.ok || !data.success) {
-            throw new Error(data.message || 'Đăng nhập thất bại.');
+            throw new Error(data.message || 'Xác thực thất bại.');
         }
-        authForm.reset();
-        currentUser = { username: data.username, role: data.role, permissions: data.permissions || [] };
-        vpnAccess = !!data.vpnAccess;
-        vpnInfo = data.vpn || vpnInfo;
-        if (redirectIfNextParam()) return;
-        applyAuthState(true);
+        finishAuthSuccess(data);
     } catch (err) {
         authError.textContent = err.message;
     } finally {
         authSubmit.disabled = false;
-        authSubmit.innerText = original;
+        if (authLoginStep === 'credentials') authSubmit.innerText = 'Đăng nhập';
+        else if (authLoginStep === 'totp_setup') authSubmit.innerText = 'Xác nhận & kích hoạt';
+        else authSubmit.innerText = 'Xác nhận';
+        void original;
     }
 });
+
+if (authBackBtn) {
+    authBackBtn.addEventListener('click', () => {
+        resetAuthLoginUi();
+        const userInput = document.getElementById('auth-username');
+        if (userInput) userInput.focus();
+    });
+}
 
 logoutBtn.addEventListener('click', async () => {
     try {
         await fetch('/api/logout', { method: 'POST' });
     } catch (err) { /* ignore */ }
+    resetAuthLoginUi();
     applyAuthState(false);
 });
 

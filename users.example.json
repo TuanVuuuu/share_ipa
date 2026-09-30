@@ -1,5 +1,23 @@
 [
-    { "username": "admin", "password": "change-me", "role": "admin" },
-    { "username": "some-dev", "password": "change-me", "role": "dev" },
-    { "username": "tester", "password": "change-me", "role": "tester" }
+    {
+        "username": "admin",
+        "password": "change-me",
+        "role": "admin",
+        "totpSecret": "",
+        "totpEnabled": false
+    },
+    {
+        "username": "some-dev",
+        "password": "change-me",
+        "role": "dev",
+        "totpSecret": "",
+        "totpEnabled": false
+    },
+    {
+        "username": "tester",
+        "password": "change-me",
+        "role": "tester",
+        "totpSecret": "",
+        "totpEnabled": false
+    }
 ]

@@ -202,16 +202,33 @@
 <div class="modal-overlay" id="auth-box" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="auth-title">
     <div class="modal-card auth-card">
         <h3 id="auth-title">Đăng nhập để tiếp tục</h3>
-        <p>Đăng nhập để mở khoá tính năng tải lên và quản lý bản build.</p>
+        <p id="auth-subtitle">Đăng nhập để mở khoá tính năng tải lên và quản lý bản build.</p>
+
         <form class="auth-form" id="auth-form">
-            <div class="auth-field">
-                <label for="auth-username">Tên đăng nhập</label>
-                <input id="auth-username" name="username" type="text" required autocomplete="username" />
+            <div id="auth-step-credentials">
+                <div class="auth-field">
+                    <label for="auth-username">Tên đăng nhập</label>
+                    <input id="auth-username" name="username" type="text" required autocomplete="username" />
+                </div>
+                <div class="auth-field">
+                    <label for="auth-password">Mật khẩu</label>
+                    <input id="auth-password" name="password" type="password" required autocomplete="current-password" />
+                </div>
             </div>
-            <div class="auth-field">
-                <label for="auth-password">Mật khẩu</label>
-                <input id="auth-password" name="password" type="password" required autocomplete="current-password" />
+
+            <div id="auth-step-totp" hidden>
+                <div class="auth-totp-setup" id="auth-totp-setup" hidden>
+                    <p class="auth-totp-hint">Quét mã QR bằng <b>Google Authenticator</b> (hoặc Authy), rồi nhập mã 6 số để kích hoạt.</p>
+                    <img id="auth-totp-qr" class="auth-totp-qr" alt="QR Google Authenticator" />
+                    <p class="auth-totp-manual" id="auth-totp-manual" hidden></p>
+                </div>
+                <div class="auth-field">
+                    <label for="auth-totp-code">Mã Google Authenticator</label>
+                    <input id="auth-totp-code" name="totp" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="••••••" />
+                </div>
+                <button type="button" class="btn secondary" id="auth-back-btn">Quay lại</button>
             </div>
+
             <button type="submit" class="btn" id="auth-submit">Đăng nhập</button>
         </form>
         <div class="auth-error" id="auth-error"></div>

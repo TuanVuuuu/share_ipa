@@ -38,7 +38,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '69';
+const ASSET_VERSION = process.env.ASSET_VERSION || '70';
 const APP_HOME_PATH = '/public';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
@@ -503,7 +503,7 @@ function parseCookies(cookieHeader = '') {
     }, {});
 }
 
-// Lấy tài khoản đang đăng nhập từ cookie phiên đã ký (HMAC) — trả về null nếu chưa đăng nhập/cookie không hợp lệ.
+// Lấy tài khoản đang đăng nhập từ cookie JWT — trả về null nếu chưa đăng nhập/cookie không hợp lệ.
 function getSessionUser(req) {
     const cookies = parseCookies(req.headers.cookie || '');
     return auth.verifySessionToken(cookies[AUTH_COOKIE_NAME]);
@@ -1080,6 +1080,28 @@ app.get('/app', (req, res) => {
     res.redirect(301, buildAppDetailPath(platform, bundleId));
 });
 
+function authCookieMaxAgeSec() {
+    return Math.max(300, Number(process.env.JWT_TTL_SEC) || 86400);
+}
+
+function setAuthCookie(res, token) {
+    const maxAge = authCookieMaxAgeSec();
+    res.append(
+        'Set-Cookie',
+        `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`
+    );
+}
+
+function issueAuthSession(req, res, user) {
+    const token = auth.createAccessToken(user.username);
+    setAuthCookie(res, token);
+    return {
+        success: true,
+        vpnAccess: hasVpnAccess(req),
+        ...auth.toPublicUser(user),
+    };
+}
+
 // Kiểm tra trạng thái đăng nhập cho frontend (kèm role/quyền để bật/tắt tính năng như xóa bản build)
 app.get('/api/auth-status', (req, res) => {
     const user = getSessionUser(req);
@@ -1087,22 +1109,73 @@ app.get('/api/auth-status', (req, res) => {
     res.json({ authenticated: true, vpnAccess: hasVpnAccess(req), ...auth.toPublicUser(user) });
 });
 
-// Đăng nhập bằng AJAX ngay trong trang chính
-app.post('/api/login', (req, res) => {
+// Bước 1: username/password → yêu cầu mã Google Authenticator (hoặc enroll lần đầu)
+app.post('/api/login', async (req, res) => {
     const { username = '', password = '' } = req.body || {};
     const user = auth.verifyCredentials(username, password);
-
-    if (user) {
-        const token = auth.createSessionToken(user.username);
-        res.setHeader(
-            'Set-Cookie',
-            `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
-        );
-
-        return res.json({ success: true, vpnAccess: hasVpnAccess(req), ...auth.toPublicUser(user) });
+    if (!user) {
+        return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không đúng.' });
     }
 
-    return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không đúng.' });
+    try {
+        if (user.totpEnabled && user.totpSecret) {
+            const pendingToken = auth.createPendingToken(user.username, 'totp_required');
+            return res.json({
+                success: true,
+                step: 'totp_required',
+                pendingToken,
+                message: 'Nhập mã 6 số từ Google Authenticator.',
+            });
+        }
+
+        const setup = await auth.beginTotpSetup(user.username);
+        return res.json({
+            success: true,
+            step: 'totp_setup',
+            pendingToken: setup.pendingToken,
+            qrDataUrl: setup.qrDataUrl,
+            otpauthUrl: setup.otpauthUrl,
+            message: 'Quét QR bằng Google Authenticator rồi nhập mã 6 số để kích hoạt.',
+        });
+    } catch (err) {
+        console.error('[AUTH] login step1 error:', err);
+        return res.status(500).json({ success: false, message: 'Không khởi tạo xác thực 2 bước được.' });
+    }
+});
+
+// Bước 2: xác nhận mã TOTP → cấp JWT cookie
+app.post('/api/login/totp', async (req, res) => {
+    const { pendingToken = '', code = '' } = req.body || {};
+    const required = auth.verifyPendingToken(pendingToken, 'totp_required');
+    const setup = required ? null : auth.verifyPendingToken(pendingToken, 'totp_setup');
+    const pending = required || setup;
+
+    if (!pending) {
+        return res.status(401).json({
+            success: false,
+            message: 'Phiên đăng nhập hết hạn. Vui lòng nhập lại tên đăng nhập và mật khẩu.',
+        });
+    }
+
+    try {
+        if (required) {
+            if (!auth.verifyTotpCode(required.user.totpSecret, code)) {
+                return res.status(401).json({ success: false, message: 'Mã Google Authenticator không đúng.' });
+            }
+            return res.json(issueAuthSession(req, res, required.user));
+        }
+
+        const secret = setup.payload.totpSecret;
+        if (!secret || !auth.verifyTotpCode(secret, code)) {
+            return res.status(401).json({ success: false, message: 'Mã Google Authenticator không đúng. Thử mã mới nhất trên app.' });
+        }
+
+        const user = auth.enableTotpForUser(setup.user.username, secret);
+        return res.json({ ...issueAuthSession(req, res, user), totpJustEnabled: true });
+    } catch (err) {
+        console.error('[AUTH] login totp error:', err);
+        return res.status(500).json({ success: false, message: 'Không hoàn tất xác thực 2 bước được.' });
+    }
 });
 
 app.post('/api/vpn-grant', (req, res) => {

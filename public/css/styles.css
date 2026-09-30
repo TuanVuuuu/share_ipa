@@ -327,6 +327,39 @@ body.auth-dialog-open > :not(.modal-overlay) {
     width: 100%;
     height: 42px;
 }
+.auth-totp-setup {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0 8px;
+}
+.auth-totp-hint {
+    margin: 0;
+    font-size: 13px;
+    color: #86868b;
+    text-align: center;
+}
+.auth-totp-qr {
+    width: 200px;
+    height: 200px;
+    border-radius: 12px;
+    border: 1px solid #e5e7ef;
+    background: #fff;
+}
+.auth-totp-manual {
+    margin: 0;
+    font-size: 11px;
+    word-break: break-all;
+    color: #6b7280;
+    text-align: center;
+}
+#auth-totp-code {
+    letter-spacing: 0.35em;
+    font-size: 20px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
 .auth-error {
     color: var(--danger);
     font-size: 13px;
