@@ -507,11 +507,11 @@
     };
 
     function askInstallPin(message) {
-        const raw = window.prompt(message || 'Nhập mã bảo mật 6 số.');
+        const raw = window.prompt(message || 'Nhập mã bảo mật từ 6 đến 20 ký tự.');
         if (raw == null) return null;
         const pin = String(raw).trim();
-        if (!/^\d{6}$/.test(pin)) {
-            window.alert('Mã bảo mật phải gồm đúng 6 chữ số.');
+        if (pin.length < 6 || pin.length > 20) {
+            window.alert('Mã bảo mật phải từ 6 đến 20 ký tự.');
             return null;
         }
         return pin;

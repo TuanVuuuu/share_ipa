@@ -170,7 +170,7 @@ async function handleTogglePin(group, pinRequired) {
     if (!isAdminUser || !group || !group.latest) return;
     let pin = '';
     if (pinRequired) {
-        pin = window.CatalogDetail.askInstallPin('Nhập mã bảo mật 6 số. Người cài đặt sẽ phải nhập mã này.');
+        pin = window.CatalogDetail.askInstallPin('Nhập mã bảo mật từ 6 đến 20 ký tự. Người cài đặt sẽ phải nhập mã này.');
         if (!pin) {
             const box = document.getElementById('detail-pin-checkbox');
             if (box) box.checked = false;
@@ -190,7 +190,7 @@ async function handleTogglePin(group, pinRequired) {
 
 async function handleChangePin(group) {
     if (!isAdminUser || !group || !group.latest || !group.pinRequired) return;
-    const pin = window.CatalogDetail.askInstallPin('Nhập mã bảo mật 6 số mới.');
+    const pin = window.CatalogDetail.askInstallPin('Nhập mã bảo mật mới, từ 6 đến 20 ký tự.');
     if (!pin) return;
     detailView.setAdminBusy(true);
     try {

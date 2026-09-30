@@ -655,8 +655,8 @@ body.auth-dialog-open > :not(.modal-overlay) {
     width: 100%;
     margin-top: 16px;
     padding: 12px 14px;
-    font-size: 22px;
-    letter-spacing: 0.35em;
+    font-size: 16px;
+    letter-spacing: 0.04em;
     text-align: center;
     border: 1px solid #e5e7eb;
     border-radius: 12px;

@@ -38,7 +38,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '71';
+const ASSET_VERSION = process.env.ASSET_VERSION || '72';
 const APP_HOME_PATH = '/public';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
@@ -1265,8 +1265,8 @@ app.post('/api/install-pin', async (req, res) => {
         if (!raw) {
             return res.status(400).json({ success: false, message: 'Thiếu thông tin bản build.' });
         }
-        if (!/^\d{6}$/.test(pin)) {
-            return res.status(400).json({ success: false, message: 'Mã bảo mật phải gồm đúng 6 chữ số.' });
+        if (!auth.isValidInstallPin(pin)) {
+            return res.status(400).json({ success: false, message: 'Mã bảo mật phải từ 6 đến 20 ký tự.' });
         }
 
         const targetId = raw.replace(/\.plist$/i, '');
@@ -2178,8 +2178,8 @@ app.post('/api/catalog/pin-required', requireAdmin, async (req, res) => {
         if (!isSafeBundleId(bundleId)) {
             return res.status(400).json({ success: false, message: 'Thiếu bundleId hợp lệ.' });
         }
-        if (pinRequired && !/^\d{6}$/.test(pin)) {
-            return res.status(400).json({ success: false, message: 'Mã bảo mật phải gồm đúng 6 chữ số.' });
+        if (pinRequired && !auth.isValidInstallPin(pin)) {
+            return res.status(400).json({ success: false, message: 'Mã bảo mật phải từ 6 đến 20 ký tự.' });
         }
         if (!github.isConfigured()) {
             return res.status(500).json({ success: false, message: 'Chưa cấu hình lưu trữ danh mục trên máy chủ nên không thể cập nhật.' });

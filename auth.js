@@ -222,6 +222,11 @@ function createFileAccessToken(filename, ttlSec = 12 * 60 * 60) {
     return `${payload}.${sign(payload)}`;
 }
 
+function isValidInstallPin(pin) {
+    const code = String(pin || '').trim();
+    return code.length >= 6 && code.length <= 20;
+}
+
 function hashInstallPin(pin) {
     return crypto.createHmac('sha256', JWT_SECRET).update(`install-pin:${String(pin)}`).digest('hex');
 }
@@ -229,7 +234,7 @@ function hashInstallPin(pin) {
 function installPinMatches(pin, pinHash) {
     const code = String(pin || '').trim();
     const stored = String(pinHash || '');
-    if (!/^\d{6}$/.test(code) || !/^[a-f0-9]{64}$/.test(stored)) return false;
+    if (!isValidInstallPin(code) || !/^[a-f0-9]{64}$/.test(stored)) return false;
     const actual = Buffer.from(hashInstallPin(code));
     const expected = Buffer.from(stored);
     if (actual.length !== expected.length) return false;
@@ -276,6 +281,7 @@ module.exports = {
     verifyTotpCode,
     createFileAccessToken,
     verifyFileAccessToken,
+    isValidInstallPin,
     hashInstallPin,
     installPinMatches,
     hasPermission,

@@ -68,8 +68,8 @@ function showPinGateUi(buildId) {
     wrap.className = 'vpn-gate';
     wrap.innerHTML = `
         <h3>Nhập mã bảo mật</h3>
-        <p class="pin-gate-help">Nhập mã 6 số để tiếp tục cài đặt.</p>
-        <input class="pin-gate-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" aria-label="Mã bảo mật 6 số">
+        <p class="pin-gate-help">Nhập mã từ 6 đến 20 ký tự để tiếp tục cài đặt.</p>
+        <input class="pin-gate-input" type="text" maxlength="20" autocomplete="off" aria-label="Mã bảo mật">
         <div class="vpn-gate-actions">
             <button type="button" class="btn vpn-lan-btn" data-pin-submit>Xác nhận</button>
         </div>
@@ -81,10 +81,10 @@ function showPinGateUi(buildId) {
     let sending = false;
     const send = async () => {
         if (sending) return;
-        const pin = String(input.value || '').replace(/\D/g, '').slice(0, 6);
+        const pin = String(input.value || '').trim().slice(0, 20);
         input.value = pin;
-        if (!/^\d{6}$/.test(pin)) {
-            error.textContent = 'Mã bảo mật phải gồm đúng 6 chữ số.';
+        if (pin.length < 6 || pin.length > 20) {
+            error.textContent = 'Mã bảo mật phải từ 6 đến 20 ký tự.';
             return;
         }
         sending = true;
@@ -109,10 +109,6 @@ function showPinGateUi(buildId) {
             input.select();
         }
     };
-    input.addEventListener('input', () => {
-        input.value = String(input.value || '').replace(/\D/g, '').slice(0, 6);
-        if (input.value.length === 6) send();
-    });
     input.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();
