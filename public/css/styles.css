@@ -656,11 +656,11 @@ body.auth-dialog-open > :not(.modal-overlay) {
     margin-top: 16px;
     padding: 12px 14px;
     font-size: 16px;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.12em;
     text-align: center;
     border: 1px solid #e5e7eb;
     border-radius: 12px;
-    font-variant-numeric: tabular-nums;
+    -webkit-text-security: disc;
 }
 .pin-gate-input:focus {
     outline: 2px solid #bfdbfe;

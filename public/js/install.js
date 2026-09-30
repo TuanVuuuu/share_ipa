@@ -69,7 +69,7 @@ function showPinGateUi(buildId) {
     wrap.innerHTML = `
         <h3>Nhập mã bảo mật</h3>
         <p class="pin-gate-help">Nhập mã từ 6 đến 20 ký tự để tiếp tục cài đặt.</p>
-        <input class="pin-gate-input" type="text" maxlength="20" autocomplete="off" aria-label="Mã bảo mật">
+        <input class="pin-gate-input" type="password" maxlength="20" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Mã bảo mật">
         <div class="vpn-gate-actions">
             <button type="button" class="btn vpn-lan-btn" data-pin-submit>Xác nhận</button>
         </div>
@@ -97,10 +97,10 @@ function showPinGateUi(buildId) {
                 body: JSON.stringify({ plist: buildId, pin }),
             });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok || !data.success) {
+            if (!res.ok || !data.success || !data.item) {
                 throw new Error((data && data.message) || 'Mã bảo mật không đúng.');
             }
-            window.location.reload();
+            await renderInstallBuild(data.item, buildId);
         } catch (err) {
             sending = false;
             submit.disabled = false;
@@ -120,6 +120,135 @@ function showPinGateUi(buildId) {
     gate.classList.add('is-open');
     gate.style.display = '';
     input.focus();
+}
+
+function hidePinGateUi() {
+    const gate = document.getElementById('pin-gate-root');
+    if (!gate) return;
+    gate.classList.remove('is-open');
+    gate.innerHTML = '';
+    gate.style.display = 'none';
+    delete gate.dataset.ready;
+}
+
+function revealInstallPage() {
+    if (installZone) installZone.classList.remove('is-denied', 'is-loading');
+    const content = document.getElementById('install-content');
+    if (content) content.style.display = '';
+    if (installBtn) installBtn.style.display = '';
+    if (installHint) installHint.style.display = '';
+    if (installBack) installBack.style.display = '';
+    const brand = document.querySelector('.install-brand');
+    if (brand) brand.style.display = '';
+    hidePinGateUi();
+}
+
+async function renderInstallBuild(it, buildId) {
+    const looksLikePlist = String(buildId || '').toLowerCase().endsWith('.plist');
+    const looksLikeApk = String(buildId || '').toLowerCase().endsWith('.apk');
+    const platform = it.platform || (looksLikeApk ? 'android' : 'ios');
+    const defaultName = platform === 'android' ? 'Ứng dụng Android' : 'Ứng dụng iOS';
+    let lanHintShown = false;
+
+    revealInstallPage();
+    installName.innerText = it.appName || defaultName;
+    installBundle.innerText = it.bundleId || '';
+    installVersion.innerText = `Phiên bản ${it.version} • Build ${it.buildNumber}`;
+    installVersion.style.display = 'inline-block';
+    if (it.icon) installIcon.src = it.icon;
+
+    if (it.downloadUrl) {
+        installBtn.href = it.downloadUrl.replace(/share-ipa\.vunt\.info/g, window.location.host);
+    } else if (looksLikePlist) {
+        const token = it.fileAccessToken;
+        let manifestUrl = `${window.location.origin}/uploads/${buildId}`;
+        if (token) manifestUrl += `${manifestUrl.includes('?') ? '&' : '?'}k=${encodeURIComponent(token)}`;
+        installBtn.href = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
+    } else if (looksLikeApk) {
+        const token = it.fileAccessToken;
+        let apkUrl = `${window.location.origin}/uploads/${buildId}`;
+        if (token) apkUrl += `${apkUrl.includes('?') ? '&' : '?'}k=${encodeURIComponent(token)}`;
+        installBtn.href = apkUrl;
+    } else {
+        installBtn.href = '#';
+    }
+
+    if (window.LanTransfer && !it.pinRequired) {
+        await window.LanTransfer.applyDownloadHref(installBtn, it);
+        const lanBase = await window.LanTransfer.getLanBase();
+        if (lanBase && it.localFileAvailable) {
+            lanHintShown = true;
+            installHint.dataset.lan = '1';
+        }
+    }
+
+    const parts = [];
+    if (it.fileSize) parts.push(`📦 ${it.fileSize}`);
+    if (it.uploadedAt) parts.push(`🕒 ${formatDateTime(it.uploadedAt)}`);
+    installExtra.innerText = parts.join('  •  ');
+
+    const tags = [];
+    if (platform === 'android') {
+        tags.push('<span class="build-tag build-tag-android">Android</span>');
+        if (it.minimumOsVersion) {
+            tags.push(`<span class="build-tag build-tag-android">API ${it.minimumOsVersion}+</span>`);
+        }
+    } else {
+        tags.push('<span class="build-tag build-tag-ios">iOS</span>');
+        if (it.minimumOsVersion) {
+            tags.push(`<span class="build-tag build-tag-ios">iOS ${it.minimumOsVersion}+</span>`);
+        }
+        if (it.profileType) {
+            tags.push(`<span class="build-tag build-tag-profile">${it.profileType}</span>`);
+        }
+        if (it.provisionedDevicesCount != null) {
+            tags.push(`<span class="build-tag build-tag-devices">${it.provisionedDevicesCount} thiết bị</span>`);
+        }
+    }
+
+    if (tags.length) {
+        const tagsEl = document.createElement('div');
+        tagsEl.className = 'build-tags install-tags';
+        tagsEl.innerHTML = tags.join('');
+        installExtra.insertAdjacentElement('afterend', tagsEl);
+
+        const devices = Array.isArray(it.provisionedDevices) ? it.provisionedDevices : [];
+        if (platform === 'ios' && devices.length) {
+            const rows = devices.map((udid, i) =>
+                `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid" title="${udid}">${maskUdid(udid)}</code></div>`
+            ).join('');
+            const detailsEl = document.createElement('details');
+            detailsEl.className = 'devices-details install-devices';
+            detailsEl.innerHTML = `
+                <summary class="devices-summary">
+                    <svg class="devices-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                    Xem ${devices.length} thiết bị đã được thêm
+                </summary>
+                <div class="devices-list">${rows}</div>`;
+            tagsEl.insertAdjacentElement('afterend', detailsEl);
+        }
+    }
+
+    if (platform === 'android') {
+        installBtn.innerText = 'Tải & cài đặt APK';
+        installHint.innerText = lanHintShown
+            ? 'Đang dùng mạng nội bộ — tải nhanh hơn. Nếu bị chặn, bật “Cài đặt từ nguồn không xác định”.'
+            : 'Mở trang này bằng Android. Nếu bị chặn, bật “Cài đặt từ nguồn không xác định” cho trình duyệt rồi mở lại file APK đã tải.';
+        if (isAndroidUa() && installBtn.href && installBtn.href !== '#') {
+            setTimeout(() => {
+                try { window.location.href = installBtn.href; } catch (_) { /* ignore */ }
+            }, 1200);
+        }
+    } else {
+        installHint.innerText = lanHintShown
+            ? 'Đang dùng mạng nội bộ — tải nhanh hơn. Nếu không tự mở màn hình cài đặt, hãy bấm "Cài đặt ngay".'
+            : 'Nếu iPhone/iPad không tự chuyển qua màn hình cài đặt, hãy bấm "Cài đặt ngay".';
+        if (isIosUa()) {
+            setTimeout(() => {
+                try { window.location.href = installBtn.href; } catch (_) { /* ignore */ }
+            }, 1200);
+        }
+    }
 }
 
 function isAndroidUa() {
@@ -147,9 +276,6 @@ async function init() {
     }
 
     const looksLikePlist = buildId.toLowerCase().endsWith('.plist');
-    const looksLikeApk = buildId.toLowerCase().endsWith('.apk');
-    let platform = looksLikeApk ? 'android' : (looksLikePlist ? 'ios' : null);
-    let lanHintShown = false;
     let vpnBlocked = false;
     let pinBlocked = false;
 
@@ -182,116 +308,27 @@ async function init() {
             throw new Error(data.message || 'Không tải được thông tin bản build.');
         }
 
-        const it = data.item;
-        platform = it.platform || platform || 'ios';
-        const defaultName = platform === 'android' ? 'Ứng dụng Android' : 'Ứng dụng iOS';
-
-        installName.innerText = it.appName || defaultName;
-        installBundle.innerText = it.bundleId || '';
-        installVersion.innerText = `Phiên bản ${it.version} • Build ${it.buildNumber}`;
-        installVersion.style.display = 'inline-block';
-        if (it.icon) installIcon.src = it.icon;
-
-        if (it.downloadUrl) {
-            installBtn.href = it.downloadUrl.replace(/share-ipa\.vunt\.info/g, window.location.host);
-        } else if (looksLikePlist) {
-            const token = it.fileAccessToken;
-            let manifestUrl = `${window.location.origin}/uploads/${buildId}`;
-            if (token) manifestUrl += `${manifestUrl.includes('?') ? '&' : '?'}k=${encodeURIComponent(token)}`;
-            installBtn.href = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
-        } else if (looksLikeApk) {
-            const token = it.fileAccessToken;
-            let apkUrl = `${window.location.origin}/uploads/${buildId}`;
-            if (token) apkUrl += `${apkUrl.includes('?') ? '&' : '?'}k=${encodeURIComponent(token)}`;
-            installBtn.href = apkUrl;
-        } else {
-            installBtn.href = '#';
-        }
-
-        if (window.LanTransfer && !it.pinRequired) {
-            await window.LanTransfer.applyDownloadHref(installBtn, it);
-            const lanBase = await window.LanTransfer.getLanBase();
-            if (lanBase && it.localFileAvailable) {
-                lanHintShown = true;
-                installHint.dataset.lan = '1';
-            }
-        }
-
-        const parts = [];
-        if (it.fileSize) parts.push(`📦 ${it.fileSize}`);
-        if (it.uploadedAt) parts.push(`🕒 ${formatDateTime(it.uploadedAt)}`);
-        installExtra.innerText = parts.join('  •  ');
-
-        const tags = [];
-        if (platform === 'android') {
-            tags.push('<span class="build-tag build-tag-android">Android</span>');
-            if (it.minimumOsVersion) {
-                tags.push(`<span class="build-tag build-tag-android">API ${it.minimumOsVersion}+</span>`);
-            }
-        } else {
-            tags.push('<span class="build-tag build-tag-ios">iOS</span>');
-            if (it.minimumOsVersion) {
-                tags.push(`<span class="build-tag build-tag-ios">iOS ${it.minimumOsVersion}+</span>`);
-            }
-            if (it.profileType) {
-                tags.push(`<span class="build-tag build-tag-profile">${it.profileType}</span>`);
-            }
-            if (it.provisionedDevicesCount != null) {
-                tags.push(`<span class="build-tag build-tag-devices">${it.provisionedDevicesCount} thiết bị</span>`);
-            }
-        }
-
-        if (tags.length) {
-            const tagsEl = document.createElement('div');
-            tagsEl.className = 'build-tags install-tags';
-            tagsEl.innerHTML = tags.join('');
-            installExtra.insertAdjacentElement('afterend', tagsEl);
-
-            const devices = Array.isArray(it.provisionedDevices) ? it.provisionedDevices : [];
-            if (platform === 'ios' && devices.length) {
-                const rows = devices.map((udid, i) =>
-                    `<div class="device-udid-row"><span class="device-index">${i + 1}.</span><code class="device-udid" title="${udid}">${maskUdid(udid)}</code></div>`
-                ).join('');
-                const detailsEl = document.createElement('details');
-                detailsEl.className = 'devices-details install-devices';
-                detailsEl.innerHTML = `
-                    <summary class="devices-summary">
-                        <svg class="devices-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-                        Xem ${devices.length} thiết bị đã được thêm
-                    </summary>
-                    <div class="devices-list">${rows}</div>`;
-                tagsEl.insertAdjacentElement('afterend', detailsEl);
-            }
-        }
+        pinBlocked = false;
+        await renderInstallBuild(data.item, buildId);
     } catch (err) {
-        installName.innerText = 'Cài đặt ứng dụng';
-        installVersion.style.display = 'none';
+        if (!pinBlocked && !vpnBlocked) {
+            installName.innerText = 'Cài đặt ứng dụng';
+            installVersion.style.display = 'none';
+        }
     } finally {
-        stopLoading();
-    }
-
-    if (vpnBlocked || pinBlocked) return;
-
-    if (platform === 'android') {
-        installBtn.innerText = 'Tải & cài đặt APK';
-        installHint.innerText = lanHintShown
-            ? 'Đang dùng mạng nội bộ — tải nhanh hơn. Nếu bị chặn, bật “Cài đặt từ nguồn không xác định”.'
-            : 'Mở trang này bằng Android. Nếu bị chặn, bật “Cài đặt từ nguồn không xác định” cho trình duyệt rồi mở lại file APK đã tải.';
-        if (isAndroidUa() && installBtn.href && installBtn.href !== '#') {
-            setTimeout(() => {
-                try { window.location.href = installBtn.href; } catch (_) { /* ignore */ }
-            }, 1200);
-        }
-    } else {
-        installHint.innerText = lanHintShown
-            ? 'Đang dùng mạng nội bộ — tải nhanh hơn. Nếu không tự mở màn hình cài đặt, hãy bấm "Cài đặt ngay".'
-            : 'Nếu iPhone/iPad không tự chuyển qua màn hình cài đặt, hãy bấm "Cài đặt ngay".';
-        if (isIosUa()) {
-            setTimeout(() => {
-                try { window.location.href = installBtn.href; } catch (_) { /* ignore */ }
-            }, 1200);
-        }
+        if (!pinBlocked) stopLoading();
     }
 }
 
 init();
+
+window.addEventListener('pageshow', (event) => {
+    if (!event.persisted || !window.__PIN_LOCKED__) return;
+    const buildId = new URLSearchParams(window.location.search).get('plist')
+        || new URLSearchParams(window.location.search).get('id')
+        || '';
+    if (!buildId) return;
+    const gate = document.getElementById('pin-gate-root');
+    if (gate) delete gate.dataset.ready;
+    showPinGateUi(buildId);
+});

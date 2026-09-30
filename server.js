@@ -38,7 +38,7 @@ const CATALOG_MAX_ITEMS = 200;             // Giới hạn số bản ghi giữ 
 
 // 👉 CHỖ DUY NHẤT cần đổi mỗi khi cập nhật giao diện (CSS/JS) để phá cache trình duyệt/CDN.
 // Đổi giá trị này (ví dụ tăng lên '3', '4'...) rồi deploy là đủ.
-const ASSET_VERSION = process.env.ASSET_VERSION || '72';
+const ASSET_VERSION = process.env.ASSET_VERSION || '74';
 const APP_HOME_PATH = '/public';
 
 // ─── Cloudflare R2 ──────────────────────────────────────────────────────────
@@ -418,16 +418,6 @@ function hasVpnAccess(req) {
     return false;
 }
 
-function pinGrantId(platform, bundleId) {
-    return `pin:${visibilityKey(platform, bundleId)}`;
-}
-
-function hasPinGrant(req, platform, bundleId) {
-    if (!bundleId) return false;
-    const cookies = parseCookies((req.headers && req.headers.cookie) || '');
-    return auth.verifyFileAccessToken(cookies[PIN_COOKIE_NAME] || '', pinGrantId(platform, bundleId));
-}
-
 function pinClientKey(req) {
     const ips = collectClientIps(req);
     return ips[0] || 'unknown';
@@ -458,8 +448,11 @@ function notePinFailure(req) {
     pinFailState.set(key, row);
 }
 
-function notePinSuccess(req) {
-    pinFailState.delete(pinClientKey(req));
+function clearPinCookie(res) {
+    res.append(
+        'Set-Cookie',
+        `${PIN_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+    );
 }
 
 function requestFileAccessToken(req) {
@@ -489,11 +482,15 @@ function addFileAccessTokenToDownloadUrl(downloadUrl, token) {
     return appendQueryParam(downloadUrl, 'k', token);
 }
 
+function pinUnlocked(item) {
+    return !!(item && item.pinUnlocked);
+}
+
 function withFileAccessToken(item, req) {
     if (!item || !item.id || !req) return item;
     if (!item.vpnRequired && !item.pinRequired) return item;
     if (item.vpnRequired && !hasVpnAccess(req)) return item;
-    if (item.pinRequired && !hasPinGrant(req, item.platform || 'ios', item.bundleId)) return item;
+    if (item.pinRequired && !pinUnlocked(item)) return item;
     const ttl = item.pinRequired ? PIN_GRANT_TTL_SEC : VPN_GRANT_TTL_SEC;
     const token = auth.createFileAccessToken(item.id, ttl);
     if (!token) return item;
@@ -919,8 +916,8 @@ app.get('/install', async (req, res) => {
                 const pinRequired = isAppPinRequired(visibility, platform, record.bundleId);
                 const vpnAccess = hasVpnAccess(req);
                 vpnLocked = !!(vpnRequired && !vpnAccess);
-                pinLocked = !!(pinRequired && !vpnLocked && !hasPinGrant(req, platform, record.bundleId));
-                if ((!vpnRequired || vpnAccess) && (!pinRequired || hasPinGrant(req, platform, record.bundleId))) {
+                pinLocked = !!(pinRequired && !vpnLocked);
+                if ((!vpnRequired || vpnAccess) && !pinRequired) {
                     const platformLabel = record.platform === 'android' ? 'Android' : 'iOS';
                     const installQuery = record.platform === 'android'
                         ? `id=${encodeURIComponent(record.id)}`
@@ -935,6 +932,7 @@ app.get('/install', async (req, res) => {
             }
         } catch (_) { /* giữ OG mặc định nếu catalog lỗi */ }
     }
+    clearPinCookie(res);
     sendHtmlWithOg(res, 'install.html', og, { vpnLocked, pinLocked });
 });
 
@@ -1291,12 +1289,18 @@ app.post('/api/install-pin', async (req, res) => {
         }
 
         notePinSuccess(req);
-        const token = auth.createFileAccessToken(pinGrantId(platform, record.bundleId), PIN_GRANT_TTL_SEC);
-        res.append(
-            'Set-Cookie',
-            `${PIN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${PIN_GRANT_TTL_SEC}`
-        );
-        return res.json({ success: true, pinRequired: true });
+        clearPinCookie(res);
+        const item = toClientBuild({
+            ...record,
+            vpnRequired: flags.vpnRequired,
+            pinRequired: true,
+            pinUnlocked: true,
+        }, req);
+        return res.json({
+            success: true,
+            pinRequired: true,
+            item: publicInstallItem(item, true),
+        });
     } catch (err) {
         return res.status(500).json({ success: false, message: 'Không xác thực mã bảo mật được.' });
     }
@@ -1615,9 +1619,8 @@ function patchAppVisibility(visibility, platform, bundleId, patch) {
 
 function stripAccessSecrets(item, req) {
     if (!item) return item;
-    const platform = item.platform || 'ios';
     const vpnBlocked = !!(item.vpnRequired && !hasVpnAccess(req));
-    const pinBlocked = !!(item.pinRequired && !hasPinGrant(req, platform, item.bundleId));
+    const pinBlocked = !!(item.pinRequired && !pinUnlocked(item));
     if (!vpnBlocked && !pinBlocked) return item;
     const next = { ...item, downloadUrl: null, fileAccessToken: null };
     if (vpnBlocked) {
@@ -1672,10 +1675,12 @@ function uploadAccessDecision(req, access) {
     if (!access || (!access.vpnRequired && !access.pinRequired)) return { ok: true };
     if (auth.verifyFileAccessToken(requestFileAccessToken(req), access.id)) return { ok: true };
     const vpnOk = !access.vpnRequired || hasVpnAccess(req);
-    const pinOk = !access.pinRequired || hasPinGrant(req, access.platform, access.bundleId);
-    if (vpnOk && pinOk) return { ok: true };
-    if (!vpnOk) return { ok: false, reason: 'vpn' };
-    return { ok: false, reason: 'pin' };
+    if (access.pinRequired) {
+        if (!vpnOk) return { ok: false, reason: 'vpn' };
+        return { ok: false, reason: 'pin' };
+    }
+    if (vpnOk) return { ok: true };
+    return { ok: false, reason: 'vpn' };
 }
 
 function denyUploadAccess(res, req, decision) {
@@ -2687,6 +2692,30 @@ app.get('/api/download-shares/:id', async (req, res) => {
     }
 });
 
+function publicInstallItem(item, pinRequired) {
+    const payload = {
+        id: item.id,
+        appName: item.appName,
+        bundleId: item.bundleId,
+        platform: item.platform || 'ios',
+        version: item.version,
+        buildNumber: item.buildNumber,
+        minimumOsVersion: item.minimumOsVersion || null,
+        profileType: item.profileType || null,
+        provisionedDevices: item.provisionedDevices || null,
+        provisionedDevicesCount: item.provisionedDevicesCount ?? null,
+        icon: item.icon,
+        fileSize: item.fileSize,
+        uploadedAt: item.uploadedAt,
+        shareUrl: item.shareUrl,
+        downloadUrl: item.downloadUrl,
+        localFileAvailable: !!item.localFileAvailable,
+        pinRequired: !!pinRequired,
+    };
+    if (item.fileAccessToken) payload.fileAccessToken = item.fileAccessToken;
+    return payload;
+}
+
 // 🌐 Endpoint CÔNG KHAI: trả về thông tin của ĐÚNG MỘT bản build theo plist/id
 // Phục vụ trang cài đặt khi người dùng quét QR (không yêu cầu đăng nhập).
 app.get('/api/app-info', async (req, res) => {
@@ -2713,35 +2742,13 @@ app.get('/api/app-info', async (req, res) => {
         if (vpnRequired && !hasVpnAccess(req)) {
             return denyVpnRequired(res, req);
         }
-        if (pinRequired && !hasPinGrant(req, platform, record.bundleId)) {
+        if (pinRequired) {
+            clearPinCookie(res);
             return denyPinRequired(res);
         }
 
         const item = toClientBuild({ ...record, vpnRequired, pinRequired }, req);
-        const payload = {
-            success: true,
-            item: {
-                id: item.id,
-                appName: item.appName,
-                bundleId: item.bundleId,
-                platform: item.platform || 'ios',
-                version: item.version,
-                buildNumber: item.buildNumber,
-                minimumOsVersion: item.minimumOsVersion || null,
-                profileType: item.profileType || null,
-                provisionedDevices: item.provisionedDevices || null,
-                provisionedDevicesCount: item.provisionedDevicesCount ?? null,
-                icon: item.icon,
-                fileSize: item.fileSize,
-                uploadedAt: item.uploadedAt,
-                shareUrl: item.shareUrl,
-                downloadUrl: item.downloadUrl,
-                localFileAvailable: !!item.localFileAvailable,
-                pinRequired: !!pinRequired,
-            }
-        };
-        if (item.fileAccessToken) payload.item.fileAccessToken = item.fileAccessToken;
-        return res.json(payload);
+        return res.json({ success: true, item: publicInstallItem(item, false) });
     } catch (err) {
         res.status(500).json({ success: false, message: `Không tải được thông tin bản build: ${err.message}` });
     }
