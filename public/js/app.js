@@ -212,10 +212,15 @@ function showTotpStep(data) {
         if (authTotpQr && data.qrDataUrl) authTotpQr.src = data.qrDataUrl;
         if (authTotpManual && data.otpauthUrl) {
             authTotpManual.hidden = false;
-            authTotpManual.textContent = `Không quét được? Thêm thủ công bằng URI trong Google Authenticator.`;
+            authTotpManual.textContent = 'Không quét được? Thêm thủ công bằng URI trong Google Authenticator.';
         }
         if (authSubmit) authSubmit.innerText = 'Xác nhận & kích hoạt';
     } else {
+        if (authTotpQr) authTotpQr.removeAttribute('src');
+        if (authTotpManual) {
+            authTotpManual.hidden = true;
+            authTotpManual.textContent = '';
+        }
         if (authTitle) authTitle.textContent = 'Xác thực 2 bước';
         if (authSubtitle) {
             authSubtitle.textContent = data.message

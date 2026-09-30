@@ -334,6 +334,9 @@ body.auth-dialog-open > :not(.modal-overlay) {
     gap: 10px;
     padding: 4px 0 8px;
 }
+.auth-totp-setup[hidden] {
+    display: none !important;
+}
 .auth-totp-hint {
     margin: 0;
     font-size: 13px;
